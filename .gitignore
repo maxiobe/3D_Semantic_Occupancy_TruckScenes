@@ -208,3 +208,6 @@ __marimo__/
 
 # Checkpoints
 prediction/BEVFormer/ckpts/
+
+# Results of Kiss/ Mapmos
+gt_generation/results
