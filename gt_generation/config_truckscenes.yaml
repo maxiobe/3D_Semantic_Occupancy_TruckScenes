@@ -1,0 +1,45 @@
+# Parameters for mesh generation:
+'depth': 11 # range between 8 - 11, Higher means more detail but more computation
+'min_density': 0.01  # range between 0.01 - 0.05 # Lower values keep more detail but may introduce noise
+'n_threads': -1 # otherwise 8
+'downsample': False
+
+# Parameters for Chamfer Distance
+'max_nn': 20
+
+# Paremeters for icp refinement
+'icp_voxel_size': 0.5
+'map_voxel_size': 0.5
+
+# Voxel parameters
+'voxel_size': 0.2 #0.4 # 0.5
+# 'occ_size':  [400, 400, 125]
+'occ_size': [1500, 1500, 125]
+
+# Parameters for ranges
+'self_range': [-1.5, -1.5, -1.0, 6.3, 1.5, 4.2]
+# 'pc_range':  [-40, -40, -5, 40, 40, 20]
+'pc_range': [-150, -150, -5, 150, 150, 20]
+
+# Filtering parameters
+# Filtering statistical outlier removal:
+sor_nb_neighbors: 20
+sor_std_ratio: 3.0
+# Filtering radius outlier removal:
+ror_nb_points: 5
+ror_radius: 0.5
+
+# Aggregate scans over different sensors
+# sensors: ['LIDAR_LEFT']
+# sensors: ['LIDAR_RIGHT']
+# sensors: ['LIDAR_LEFT', 'LIDAR_RIGHT']
+sensors: ['LIDAR_LEFT', 'LIDAR_RIGHT', 'LIDAR_TOP_FRONT', 'LIDAR_TOP_LEFT', 'LIDAR_TOP_RIGHT', 'LIDAR_REAR']
+cameras: ['CAMERA_LEFT_FRONT', 'CAMERA_RIGHT_FRONT', 'CAMERA_LEFT_BACK', 'CAMERA_RIGHT_BACK']
+max_time_diff: 90000
+
+# Parameters for camera visibility
+'camera_ray_depth_max': 100
+
+# Parameters for lidar intensity filtering
+'intensity_threshold': 0
+'distance_intensity_threshold': 30
