@@ -1911,38 +1911,77 @@ def calculate_3d_iou_pytorch3d(boxes1_params: np.ndarray, boxes2_params: np.ndar
 
     return iou_matrix_gpu.cpu().numpy()
 
-def get_object_overlap_signature_BATCH(frame_data, target_obj_idx_in_frame, iou_min_threshold=0.01):
+def calculate_3d_overlap_ratio_pytorch3d(boxes1_params: np.ndarray, boxes2_params: np.ndarray) -> np.ndarray:
     """
-    FINAL VERSION.
-    Calculates a robust overlap signature for the target object in the given frame
-    using a single, efficient batch call to the PyTorch3D IoU function.
+    Calculates the overlap ratio (Intersection / min(Volume)) using PyTorch3D.
+
+    Args:
+        boxes1_params (np.ndarray): Box parameters of shape (N, 7) [cx,cy,cz,w,l,h,yaw].
+        boxes2_params (np.ndarray): Box parameters of shape (M, 7) [cx,cy,cz,w,l,h,yaw].
+
+    Returns:
+        np.ndarray: A matrix of overlap ratios of shape (N, M).
     """
+    # Use GPU if available
+    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+
+    # Convert numpy arrays to GPU tensors
+    b1_t = torch.from_numpy(boxes1_params).float().to(device)
+    b2_t = torch.from_numpy(boxes2_params).float().to(device)
+
+    # Convert parameterized boxes to 8 corner coordinates
+    corners1 = convert_boxes_to_corners(b1_t)
+    corners2 = convert_boxes_to_corners(b2_t)
+
+    # 1. Calculate Intersection Volume using the PyTorch3D CUDA kernel
+    intersection_vol_gpu, _ = box3d_overlap(corners1, corners2)
+
+    # 2. Calculate the volumes of all boxes
+    # Dims are [w, l, h] at indices 3, 4, 5
+    vol1_gpu = b1_t[:, 3] * b1_t[:, 4] * b1_t[:, 5]  # Shape: (N,)
+    vol2_gpu = b2_t[:, 3] * b2_t[:, 4] * b2_t[:, 5]  # Shape: (M,)
+
+    # 3. Create a matrix of the minimum volumes using broadcasting
+    # Reshape volumes to (N, 1) and (1, M) to create an (N, M) matrix
+    min_volume_matrix = torch.minimum(vol1_gpu.unsqueeze(1), vol2_gpu.unsqueeze(0))
+
+    # 4. Calculate the overlap ratio
+    # Add a small epsilon to avoid division by zero
+    overlap_ratio_matrix_gpu = intersection_vol_gpu / (min_volume_matrix + 1e-6)
+
+    return overlap_ratio_matrix_gpu.cpu().numpy()
+
+def get_object_overlap_signature_BATCH(frame_data, target_obj_idx_in_frame, min_threshold=0.01):
+    """
+        Calculates a RICH overlap signature including overlap ratio and centroid distance.
+        """
     all_boxes_in_frame = frame_data['gt_bbox_3d_overlap_enlarged']
 
     # Isolate the single target box for the batch call
     target_box = all_boxes_in_frame[target_obj_idx_in_frame:target_obj_idx_in_frame + 1]  # Shape: (1, 7)
 
-    # --- Perform ONE batch calculation for maximum efficiency ---
-    # This computes IoU between the target box and all boxes, returning a (1, M) matrix.
-    iou_row = calculate_3d_iou_pytorch3d(target_box, all_boxes_in_frame)[0]
+    overlap_ratio_row = calculate_3d_overlap_ratio_pytorch3d(target_box, all_boxes_in_frame)[0]
+    target_obj_bbox_params = all_boxes_in_frame[target_obj_idx_in_frame]
+    target_centroid = target_obj_bbox_params[:3]
 
     overlaps = []
     for other_obj_idx, other_obj_token in enumerate(frame_data['object_tokens']):
         if other_obj_idx == target_obj_idx_in_frame:
             continue
 
-        # Look up the pre-calculated IoU
-        iou = iou_row[other_obj_idx]
+        ratio = overlap_ratio_row[other_obj_idx]
 
-        if iou > iou_min_threshold:
-            target_obj_bbox_params = all_boxes_in_frame[target_obj_idx_in_frame]
+        if ratio > min_threshold:
             other_obj_bbox_params = all_boxes_in_frame[other_obj_idx]
+            other_centroid = other_obj_bbox_params[:3]
 
+            centroid_dist = np.linalg.norm(target_centroid - other_centroid)
             relative_yaw = calculate_relative_yaw(target_obj_bbox_params, other_obj_bbox_params)
             other_obj_category = frame_data['converted_object_category'][other_obj_idx]
-            overlaps.append((iou, other_obj_token, other_obj_category, relative_yaw))
 
-    overlaps.sort(key=lambda x: x[1])
+            overlaps.append((ratio, centroid_dist, other_obj_token, other_obj_category, relative_yaw))
+
+    overlaps.sort(key=lambda x: x[2])
     return overlaps
 
 def compare_signatures(sig1, sig2,
@@ -2060,7 +2099,44 @@ def compare_signatures_class_based(sig1, target_cat1, sig2, target_cat2, thresho
     # If all checks passed for all interactions, the signatures are a match
     return True
 
-def are_box_sizes_similar(box1_params, box2_params, volume_ratio_tolerance=1.05):
+def compare_signatures_class_based_OVERLAP_RATIO(sig1, target_cat1, sig2, target_cat2, thresholds_config):
+    """
+    Compares two overlap signatures using class-based thresholds for Overlap Ratio.
+    """
+    if target_cat1 != target_cat2 or len(sig1) != len(sig2):
+        return False
+    if not sig1:
+        return True # An isolated object is a match with another isolated object
+
+    for i in range(len(sig1)):
+        ratio1, dist1, token1, neighbor_cat1, yaw1 = sig1[i]
+        ratio2, dist2, token2, neighbor_cat2, yaw2 = sig2[i]
+
+        if token1 != token2 or neighbor_cat1 != neighbor_cat2:
+            return False
+
+        class_pair_key = frozenset({target_cat1, neighbor_cat1})
+        params = thresholds_config.get(class_pair_key, thresholds_config['default'])
+
+        # --- Check 1: Centroid Distance (Primary, most reliable) ---
+        if abs(dist1 - dist2) > params['dist_tolerance_m']:
+            return False
+
+        # --- Check 2: Relative Yaw (Secondary, reliable) ---
+        if abs(yaw1 - yaw2) > params['yaw_tolerance_rad']:
+            return False
+
+        # --- Check 3: Overlap Ratio (Weak sanity check) ---
+        # This check only fails if the ratios are wildly different.
+        if abs(ratio1 - ratio2) > params['ratio_absolute_tolerance']:
+            return False
+
+    # If all interacting pairs pass the checks, the signatures match
+    return True
+
+def are_box_sizes_similar(box1_params, box2_params,
+                             volume_ratio_tolerance=1.1,
+                             dim_ratio_tolerance=1.1):
     """
     Checks if the dimensions of two bounding boxes are similar based on their volume ratio.
 
@@ -2074,27 +2150,31 @@ def are_box_sizes_similar(box1_params, box2_params, volume_ratio_tolerance=1.05)
         bool: True if the box sizes are considered similar.
     """
     # Extract dimensions (l, w, h)
+    # --- 1. Individual Dimension Check (New) ---
     dims1 = box1_params[3:6]
     dims2 = box2_params[3:6]
 
-    # Calculate volumes
+    dim_ratios = np.maximum(dims1, dims2) / (np.minimum(dims1, dims2) + 1e-6)
+
+    # Check if ALL individual dimension ratios are within the tolerance
+    individual_dims_ok = np.all(dim_ratios <= dim_ratio_tolerance)
+
+    # --- 2. Overall Volume Check (Original Logic) ---
     volume1 = dims1[0] * dims1[1] * dims1[2]
     volume2 = dims2[0] * dims2[1] * dims2[2]
 
     # Avoid division by zero if a box has no volume
     if volume1 < 1e-6 or volume2 < 1e-6:
-        # Consider them not similar if one has volume and the other doesn't,
-        # but similar if both have no volume.
-        return (volume1 < 1e-6) and (volume2 < 1e-6)
-
-    # Calculate the ratio of the larger volume to the smaller volume
-    if volume1 > volume2:
-        ratio = volume1 / volume2
+        # Handle zero-volume case
+        volume_ok = (volume1 < 1e-6) and (volume2 < 1e-6)
     else:
-        ratio = volume2 / volume1
+        # Handle non-zero volume case
+        ratio = max(volume1, volume2) / min(volume1, volume2)
+        volume_ok = ratio <= volume_ratio_tolerance
 
-    # Check if the ratio is within the allowed tolerance
-    return ratio <= volume_ratio_tolerance
+    # --- 3. Final Result ---
+    # Both conditions must be true for the boxes to be considered similar in size and shape.
+    return individual_dims_ok and volume_ok
 
 
 def is_point_centroid_z_similar(points1, points2, category_id,
@@ -2588,29 +2668,29 @@ def main(trucksc, indice, truckscenesyaml, args, config):
 
     CLASS_BASED_THRESHOLDS = {
         frozenset({TRUCK_ID, TRAILER_ID}): {
-            'iou_strong_threshold': 0.10,
-            'iou_strong_tolerance': 0.10,
-            'yaw_tolerance_rad': 0.1
+            'dist_tolerance_m': 1.0,  # Centroid distance must be within 50cm
+            'yaw_tolerance_rad': 0.1,  # Relative yaw must be within ~6 degrees
+            'ratio_absolute_tolerance': 0.2  # Overlap ratio
         },
         frozenset({CAR_ID, CAR_ID}): {
-            'iou_strong_threshold': 0.05,
-            'iou_strong_tolerance': 0.05,
-            'yaw_tolerance_rad': 0.2
+            'dist_tolerance_m': 0.5,
+            'yaw_tolerance_rad': 0.1,
+            'ratio_absolute_tolerance': 0.2
         },
         frozenset({TRUCK_ID, OTHER_VEHICLE_ID}): {
-            'iou_strong_threshold': 0.01,
-            'iou_strong_tolerance': 0.001,
-            'yaw_tolerance_rad': 0.2
+            'dist_tolerance_m': 0.5,
+            'yaw_tolerance_rad': 0.1,
+            'ratio_absolute_tolerance': 0.05
         },
         frozenset({TRAILER_ID, OTHER_VEHICLE_ID}): {
-            'iou_strong_threshold': 0.01,
-            'iou_strong_tolerance': 0.001,
-            'yaw_tolerance_rad': 0.2
+            'dist_tolerance_m': 0.5,
+            'yaw_tolerance_rad': 0.2,
+            'ratio_absolute_tolerance': 0.05
         },
         'default': {
-            'iou_strong_threshold': 0.05,
-            'iou_strong_tolerance': 0.01,
-            'yaw_tolerance_rad': 0.15
+            'dist_tolerance_m': 0.5,
+            'yaw_tolerance_rad': 0.2,
+            'ratio_absolute_tolerance': 0.1
         }
     }
 
@@ -3897,8 +3977,8 @@ def main(trucksc, indice, truckscenesyaml, args, config):
                     tok: learning_id_to_name.get(cat_id, 'Unknown')
                     for tok, cat_id in zip(current_keyframe_object_tokens, current_keyframe_object_categories)
                 }
-                sig_str = ", ".join([f"({iou:.4f}, {learning_id_to_name.get(cat_id, '?')}, {yaw:.4f} rad)"
-                                     for iou, tok, cat_id, yaw in signature_at_keyframe_i])
+                sig_str = ", ".join([f"(ratio={ratio:.4f}, dist={dist:.2f}m, {learning_id_to_name.get(cat_id, '?')}, {yaw:.4f} rad)"
+                                     for ratio, dist, tok, cat_id, yaw in signature_at_keyframe_i])
                 print(f"    Signature for '{class_name}': [{sig_str}]")
 
             contextual_canonical_segments = []
@@ -3924,15 +4004,16 @@ def main(trucksc, indice, truckscenesyaml, args, config):
                     points_candidate = candidate_frame_data['object_points_list'][candidate_obj_idx]
 
                     # Compare the keyframe's signature with the candidate's signature
-                    if (compare_signatures_class_based(
+                    if (compare_signatures_class_based_OVERLAP_RATIO(
                             signature_at_keyframe_i, category_id_keyframe,
                             signature_at_candidate_frame, category_id_candidate,
                             CLASS_BASED_THRESHOLDS
                     ) and
-                            are_box_sizes_similar(bbox_params_keyframe, bbox_params_candidate) and
+                            are_box_sizes_similar(bbox_params_keyframe, bbox_params_candidate, volume_ratio_tolerance=1.05,
+                             dim_ratio_tolerance=1.05) and
                             is_point_centroid_z_similar(points_keyframe, points_candidate,
                                                         category_id_keyframe, OTHER_VEHICLE_ID,
-                                                        z_tolerance=0.5)):
+                                                        z_tolerance=0.3)):
                         # Contexts match! Get the points from this candidate frame.
                         obj_points_in_candidate = candidate_frame_data['object_points_list'][candidate_obj_idx]
                         obj_sids_in_candidate = candidate_frame_data['object_points_list_sensor_ids'][candidate_obj_idx]
