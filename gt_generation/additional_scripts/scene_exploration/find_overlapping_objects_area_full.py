@@ -63,11 +63,11 @@ def convert_boxes_to_corners(centers: torch.Tensor, dims: torch.Tensor, rot_matr
         [-1, 1, 1, -1, -1, 1, 1, -1], device=DEVICE, dtype=centers.dtype
     )
 
-    y_corners = (h / 2).unsqueeze(1) * torch.tensor(
+    y_corners = (w / 2).unsqueeze(1) * torch.tensor(
         [-1, -1, 1, 1, -1, -1, 1, 1], device=DEVICE, dtype=centers.dtype
     )
 
-    z_corners = (w / 2).unsqueeze(1) * torch.tensor(
+    z_corners = (h / 2).unsqueeze(1) * torch.tensor(
         [-1, -1, -1, -1, 1, 1, 1, 1], device=DEVICE, dtype=centers.dtype
     )
 
