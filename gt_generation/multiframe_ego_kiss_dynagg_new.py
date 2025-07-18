@@ -2236,45 +2236,100 @@ def calculate_relative_yaw(box1_params, box2_params):
     return relative_yaw
 
 
-def get_weather_intensity_filter_mask(point_cloud: np.ndarray, weather_condition: str, intensity_thresh: float, distance_thresh: float) -> np.ndarray:
+def get_ground_plane_mask(
+    point_cloud: np.ndarray,
+    ground_z_min: float,
+    ground_z_max: float
+) -> np.ndarray:
     """
-    Calculates a boolean mask for lidar intensity filtering in bad weather.
-    For good weather, it returns a mask that keeps all points.
+    Identifies points that are likely on the ground plane based on their Z-coordinate.
 
     Args:
-        point_cloud (np.ndarray): The input point cloud (N, D), where D>=4 and column 3 is intensity.
+        point_cloud (np.ndarray): The input point cloud (N, D) in the ego frame.
+        ground_z_min (float): The minimum Z-value for a point to be considered ground.
+                              (e.g., -2.5 meters below the sensor).
+        ground_z_max (float): The maximum Z-value for a point to be considered ground.
+                              (e.g., -1.0 meters below the sensor).
+
+    Returns:
+        np.ndarray: A boolean mask of shape (N,) where True indicates a likely ground point.
+    """
+    if point_cloud.shape[0] == 0:
+        return np.array([], dtype=bool)
+
+    z_coords = point_cloud[:, 2]
+    ground_mask = (z_coords >= ground_z_min) & (z_coords <= ground_z_max)
+    return ground_mask
+
+def get_weather_intensity_filter_mask(
+        point_cloud: np.ndarray,
+        weather_condition: str,
+        intensity_thresh: float,
+        distance_thresh: float,
+        keep_ground_points: bool = True,
+        ground_z_min: float = -2.5,
+        ground_z_max: float = -1.0
+) -> np.ndarray:
+    """
+    Calculates a boolean mask for lidar intensity filtering in bad weather,
+    with an option to always preserve likely ground points.
+
+    Args:
+        point_cloud (np.ndarray): The input point cloud (N, D), where D>=4.
         weather_condition (str): The weather condition, e.g., 'snow', 'rain'.
-        intensity_thresh (float): The minimum intensity to keep for points within the distance threshold.
-        distance_thresh (float): The distance from ego (origin) within which to apply the intensity filter.
+        intensity_thresh (float): The minimum intensity to keep for non-ground points.
+        distance_thresh (float): The distance from ego to apply the intensity filter.
+        keep_ground_points (bool): If True, points within the ground Z-range are always kept.
+        ground_z_min (float): The minimum Z-value to consider a point as ground.
+        ground_z_max (float): The maximum Z-value to consider a point as ground.
 
     Returns:
         np.ndarray: A boolean mask of shape (N,) where True indicates points to keep.
     """
-    # If the weather is good, we don't filter anything. Return a mask that keeps all points.
     if weather_condition not in ['snow', 'rain', 'fog']:
-        print(f"No intensity filtering for weather condition '{weather_condition}'.")
         return np.ones(point_cloud.shape[0], dtype=bool)
 
-    # If the point cloud is empty, return an empty mask.
     if point_cloud.shape[0] == 0:
-        print("Empty point cloud. Returning empty mask")
+        print("Empty point cloud. Returning empty mask.")
         return np.array([], dtype=bool)
 
-    print(f"Calculating intensity filter for weather condition '{weather_condition}'.")
+    print(f"Calculating weather intensity filter for '{weather_condition}'...")
 
-    # Calculate distance from each point to the ego vehicle (origin 0,0,0 in ego frame)
+    # --- Calculations for filter logic and reporting ---
     distances_to_ego = np.linalg.norm(point_cloud[:, :3], axis=1)
-
-    # Extract lidar intensity values (assuming it's the 4th column, index 3)
     pc_lidar_intensities = point_cloud[:, 3]
 
-    # A point is kept if:
-    # 1. It is BEYOND the distance threshold, OR
-    # 2. It is WITHIN the distance threshold AND its intensity is ABOVE the intensity threshold.
-    keep_mask = (distances_to_ego > distance_thresh) | \
-                ((distances_to_ego <= distance_thresh) & (pc_lidar_intensities > intensity_thresh))
+    # --- Main intensity filter logic ---
+    # A point is kept by the intensity filter if it's far away OR if it's close and has high intensity.
+    intensity_keep_mask = (distances_to_ego > distance_thresh) | \
+                          ((distances_to_ego <= distance_thresh) & (pc_lidar_intensities > intensity_thresh))
 
-    return keep_mask
+    # Find points that are far away but have low intensity. These are the ones "saved" by the distance rule.
+    low_intensity_mask = pc_lidar_intensities <= intensity_thresh
+    far_distance_mask = distances_to_ego > distance_thresh
+    num_kept_by_distance = np.sum(low_intensity_mask & far_distance_mask)
+    print(f"  - Preserved {num_kept_by_distance} low-intensity points due to being beyond the distance threshold.")
+
+    # --- Optional ground point preservation ---
+    if keep_ground_points:
+        print("  - Ground point preservation is ON.")
+        is_ground_mask = get_ground_plane_mask(point_cloud, ground_z_min, ground_z_max)
+
+        # ground_points = point_cloud[is_ground_mask]
+        # visualize_pointcloud(ground_points, title=f"Ground points")
+
+        # Combine the masks: A point is kept if it passes the intensity filter OR it's a ground point.
+        final_keep_mask = intensity_keep_mask | is_ground_mask
+
+        # Report how many ground points were "saved" by this rule.
+        num_ground_kept = np.sum(is_ground_mask & ~intensity_keep_mask)
+        print(f"  - Preserved {num_ground_kept} low-intensity ground points.")
+    else:
+        print("  - Ground point preservation is OFF.")
+        final_keep_mask = intensity_keep_mask
+
+    return final_keep_mask
+
 
 def resolve_overlap_by_distance(
     ambiguous_points_xyz: np.ndarray,
@@ -2620,6 +2675,8 @@ def main(trucksc, indice, truckscenesyaml, args, config):
 
     intensity_threshold = config['intensity_threshold'] # Threshold for lidar intensity filtering
     distance_intensity_threshold = config['distance_intensity_threshold'] # Distance for lidar intensity filtering
+    ground_z_min_threshold = config['ground_z_min_threshold']
+    ground_z_max_threshold = config['ground_z_max_threshold']
 
     max_time_diff = config['max_time_diff'] # allowed time difference between different sensors for aggregating over sensors
 
@@ -3024,7 +3081,10 @@ def main(trucksc, indice, truckscenesyaml, args, config):
                     point_cloud=background_points_to_filter,
                     weather_condition=weather,
                     intensity_thresh=intensity_threshold,
-                    distance_thresh=distance_intensity_threshold
+                    distance_thresh=distance_intensity_threshold,
+                    keep_ground_points=True,
+                    ground_z_min=ground_z_min_threshold,
+                    ground_z_max=ground_z_max_threshold
                 )
 
                 # Start with a final mask that keeps all points in `pc_for_icp`.
@@ -3157,7 +3217,10 @@ def main(trucksc, indice, truckscenesyaml, args, config):
                 point_cloud=pc_ego,
                 weather_condition=weather,
                 intensity_thresh=intensity_threshold,
-                distance_thresh=distance_intensity_threshold
+                distance_thresh=distance_intensity_threshold,
+                keep_ground_points=True,
+                ground_z_min=ground_z_min_threshold,
+                ground_z_max=ground_z_max_threshold
             )
 
             # Apply the mask to both the points and their corresponding sensor IDs

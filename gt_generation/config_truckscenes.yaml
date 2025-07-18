@@ -43,3 +43,5 @@ max_time_diff: 90000
 # Parameters for lidar intensity filtering
 'intensity_threshold': 0
 'distance_intensity_threshold': 30
+'ground_z_min_threshold': -5.0
+'ground_z_max_threshold': 0.2
