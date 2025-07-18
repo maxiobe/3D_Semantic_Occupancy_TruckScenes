@@ -1,5 +1,5 @@
 labels:
-  0: 'noise' # Fehlt
+  # 0: 'noise' # Not included in truckscenes
   1: 'animal'
   2: 'human.pedestrian.adult'
   3: 'human.pedestrian.child'
@@ -23,20 +23,20 @@ labels:
   21: 'vehicle.motorcycle'
   22: 'vehicle.trailer'
   23: 'vehicle.truck'
-  # 24: 'flat.driveable_surface' Fehlt
-  # 25: 'flat.other' Fehlt
-  # 26: 'flat.sidewalk' Fehlt
-  # 27: 'flat.terrain' Fehlt
-  # 28: 'static.manmade' Fehlt
-  # 29: 'static.other' Fehlt
-  # 30: 'static.vegetation' Fehlt
-  # 31: 'vehicle.ego' Fehlt
-  32: 'vehicle.train' # new
-  33: 'static_object.traffic_sign' # new
-  34: 'vehicle.other' # new
-  35: 'vehicle.ego_trailer' # new
-  36: 'Unknown' # new
-  37: 'Background' # new
+  # 24: 'flat.driveable_surface' Not included in truckscenes
+  # 25: 'flat.other' Not included in truckscenes
+  # 26: 'flat.sidewalk' Not included in trucksccenes
+  # 27: 'flat.terrain' Not included in truckscenes
+  # 28: 'static.manmade' Not included in truckscenes
+  # 29: 'static.other' Not included in truckscenes
+  # 30: 'static.vegetation' Not included in truckscenes
+  # 31: 'vehicle.ego' Not included in truckscenes
+  32: 'vehicle.train' # New in truckscenes
+  33: 'static_object.traffic_sign' # New in truckscenes
+  34: 'vehicle.other' # New in truckscenes
+  35: 'vehicle.ego_trailer' # New in truckscenes
+  36: 'Unknown' # New in truckscenes - used for aggregating dynamic objects from manual annotation e.g. cranes
+  37: 'Background' # New inb truckscenes
   38: 'Free'
 labels_16:
   0: 'noise'
@@ -44,43 +44,34 @@ labels_16:
   2: 'bicycle'
   3: 'bus'
   4: 'car'
-  5: 'construction_vehicle'
+  5: 'other_vehicle'
   6: 'motorcycle'
   7: 'pedestrian'
   8: 'traffic_cone'
   9: 'trailer'
   10: 'truck'
-  # 11: 'driveable_surface'
   11: 'animal'
-  12: 'traffic_sign' # new
-  # 13: 'sidewalk'
-  13: 'other_vehicle' # new
-  # 14: 'terrain'
-  14: 'train' # new
-  # 15: 'manmade'
-  15: 'Unknown' # new
-  # 16: 'vegetation'
-  16: 'Background' # new
-  17: 'Free'
+  12: 'traffic_sign'
+  13: 'background'
+  14: 'free'
+  15: 'Unknown'
 learning_map:
-  1: 11 # ?
-  5: 0 # ?
-  7: 0 # ?
-  8: 0 # ?
-  10: 0 # ?
-  11: 0 # ?
-  13: 0 # ?
-  19: 0 # ?
-  20: 0 # ?
-  0: 0 # ?
-  # 29: 0
-  # 31: 0
+  5: 0
+  7: 0
+  8: 0
+  10: 0
+  11: 0
+  13: 0
+  19: 0
+  20: 0
+  32: 0
   9: 1
   14: 2
   15: 3
   16: 3
   17: 4
   18: 5
+  34: 5
   21: 6
   2: 7
   3: 7
@@ -88,16 +79,10 @@ learning_map:
   6: 7
   12: 8
   22: 9
-  23: 10
-  # 24: 11
-  # 25: 12
-  # 26: 13
-  # 27: 14
-  # 28: 15
-  # 30: 16
-  32: 14
-  33: 12
-  34: 13
   35: 9
+  23: 10
+  1: 11
+  33: 12
+  37: 13
+  38: 14
   36: 15
-  37: 16

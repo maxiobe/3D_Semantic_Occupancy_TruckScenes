@@ -2355,7 +2355,10 @@ def assign_label_by_L_shape(
         pt_labels: np.ndarray,
         all_object_points: List[np.ndarray],
         dyn_points_in_boxes: torch.Tensor,
-        high_overlap_threshold: float = 0.85
+        ID_TRAILER,
+        ID_TRUCK,
+        ID_FORKLIFT,
+        high_overlap_threshold: float = 0.85,
 ) -> Tuple[np.ndarray, List[int]]:
     """
     Handles complex multi-class overlaps with a priority system:
@@ -2365,26 +2368,10 @@ def assign_label_by_L_shape(
     new_labels = pt_labels.flatten().copy()
     reassigned_point_indices = []
 
-    NOISE_ID = 0
-    BARRIER_ID = 1
-    BICYCLE_ID = 2
-    BUS_ID = 3
-    CAR_ID = 4
-    CONSTRUCTION_ID = 5
-    MOTORCYCLE_ID = 6
-    PEDESTRIAN_ID = 7
-    CONE_ID = 8
-    TRAILER_ID = 9
-    TRUCK_ID = 10
-    ANIMAL_ID = 11
-    SIGN_ID = 12
-    FORKLIFT_ID = 13
-    TRAIN_ID = 14
-
     # --- Step 1: Pre-compute Truck-to-Trailer Pairings via IoU ---
     truck_to_trailer_map = {}
-    all_truck_indices = np.where(box_cls_labels == TRUCK_ID)[0]
-    all_trailer_indices = np.where(box_cls_labels == TRAILER_ID)[0]
+    all_truck_indices = np.where(box_cls_labels == ID_TRUCK)[0]
+    all_trailer_indices = np.where(box_cls_labels == ID_TRAILER)[0]
     if all_truck_indices.size > 0 and all_trailer_indices.size > 0:
         truck_boxes = boxes_iou[all_truck_indices]
         trailer_boxes = boxes_iou[all_trailer_indices]
@@ -2420,13 +2407,13 @@ def assign_label_by_L_shape(
         overlapping_classes = {box_cls_labels[b_idx] for b_idx in overlapping_box_indices}
         point_to_class_map = {box_cls_labels[b_idx]: b_idx for b_idx in overlapping_box_indices}
 
-        is_special_case = {TRUCK_ID, TRAILER_ID}.issubset(overlapping_classes) or \
-                          {TRUCK_ID, FORKLIFT_ID}.issubset(overlapping_classes)
+        is_special_case = {ID_TRUCK, ID_TRAILER}.issubset(overlapping_classes) or \
+                          {ID_TRUCK, ID_FORKLIFT}.issubset(overlapping_classes)
 
         if is_special_case:
             # --- Rule 1: Handle 3-way Truck, Trailer, Forklift overlaps (Highest Priority) ---
-            if {TRUCK_ID, TRAILER_ID, FORKLIFT_ID}.issubset(overlapping_classes):
-                idx_tr = point_to_class_map[TRUCK_ID]
+            if {ID_TRUCK, ID_TRAILER, ID_FORKLIFT}.issubset(overlapping_classes):
+                idx_tr = point_to_class_map[ID_TRUCK]
 
                 # Perform the L-shape check for the truck first
                 # (Code to create L_tr and check point is condensed here for clarity)
@@ -2435,31 +2422,31 @@ def assign_label_by_L_shape(
                 trailer_center_in_truck_frame = transform_matrix([cx_tr, cy_tr, cz_tr],
                                                                  Quaternion(axis=[0, 0, 1], angle=yaw_tr),
                                                                  inverse=True) @ [
-                                                    boxes[point_to_class_map[TRAILER_ID]][0],
-                                                    boxes[point_to_class_map[TRAILER_ID]][1],
-                                                    boxes[point_to_class_map[TRAILER_ID]][2], 1]
+                                                    boxes[point_to_class_map[ID_TRAILER]][0],
+                                                    boxes[point_to_class_map[ID_TRAILER]][1],
+                                                    boxes[point_to_class_map[ID_TRAILER]][2], 1]
                 L_tr, z_ground, z_roof = create_side_L_shapes(
                     (0, 0, 0, l_tr, w_tr, h_tr, 0),
                     (trailer_center_in_truck_frame[0], trailer_center_in_truck_frame[1],
                      trailer_center_in_truck_frame[2],
-                     boxes[point_to_class_map[TRAILER_ID]][4], boxes[point_to_class_map[TRAILER_ID]][3],
-                     boxes[point_to_class_map[TRAILER_ID]][5], 0)
+                     boxes[point_to_class_map[ID_TRAILER]][4], boxes[point_to_class_map[ID_TRAILER]][3],
+                     boxes[point_to_class_map[ID_TRAILER]][5], 0)
                 )
                 xg, yg, zg = points[pi]
                 dx_pt = (xg - cx_tr) * c - (yg - cy_tr) * s
                 dz_pt = zg - cz_tr
 
                 if L_tr.contains(Point(dx_pt, dz_pt)):
-                    new_labels[pi] = TRUCK_ID
+                    new_labels[pi] = ID_TRUCK
                     changed_ids += 1
                 else:
                     # If not in truck's L-shape, your next priority is trailer
-                    new_labels[pi] = TRAILER_ID
+                    new_labels[pi] = ID_TRAILER
                     changed_ids += 1
 
             # --- Rule 2: Handle original Truck & Trailer overlaps ---
-            elif {TRUCK_ID, TRAILER_ID}.issubset(overlapping_classes):
-                idx_tr = point_to_class_map[TRUCK_ID]
+            elif {ID_TRUCK, ID_TRAILER}.issubset(overlapping_classes):
+                idx_tr = point_to_class_map[ID_TRUCK]
 
                 # Same L-shape logic as your preferred method
                 cx_tr, cy_tr, cz_tr, w_tr, l_tr, h_tr, yaw_tr, _ = boxes[idx_tr]
@@ -2467,36 +2454,36 @@ def assign_label_by_L_shape(
                 trailer_center_in_truck_frame = transform_matrix([cx_tr, cy_tr, cz_tr],
                                                                  Quaternion(axis=[0, 0, 1], angle=yaw_tr),
                                                                  inverse=True) @ [
-                                                    boxes[point_to_class_map[TRAILER_ID]][0],
-                                                    boxes[point_to_class_map[TRAILER_ID]][1],
-                                                    boxes[point_to_class_map[TRAILER_ID]][2], 1]
+                                                    boxes[point_to_class_map[ID_TRAILER]][0],
+                                                    boxes[point_to_class_map[ID_TRAILER]][1],
+                                                    boxes[point_to_class_map[ID_TRAILER]][2], 1]
                 L_tr, _, _ = create_side_L_shapes(
                     (0, 0, 0, l_tr, w_tr, h_tr, 0),
                     (trailer_center_in_truck_frame[0], trailer_center_in_truck_frame[1],
                      trailer_center_in_truck_frame[2],
-                     boxes[point_to_class_map[TRAILER_ID]][4], boxes[point_to_class_map[TRAILER_ID]][3],
-                     boxes[point_to_class_map[TRAILER_ID]][5], 0)
+                     boxes[point_to_class_map[ID_TRAILER]][4], boxes[point_to_class_map[ID_TRAILER]][3],
+                     boxes[point_to_class_map[ID_TRAILER]][5], 0)
                 )
                 xg, yg, zg = points[pi]
                 dx_pt = (xg - cx_tr) * c - (yg - cy_tr) * s
                 dz_pt = zg - cz_tr
 
                 if L_tr.contains(Point(dx_pt, dz_pt)):
-                    new_labels[pi] = TRUCK_ID
+                    new_labels[pi] = ID_TRUCK
                     changed_ids += 1
                 else:
-                    new_labels[pi] = TRAILER_ID
+                    new_labels[pi] = ID_TRAILER
                     changed_ids += 1
 
             # --- Rule 3: Handle 2-way Trailer & Forklift overlaps ---
-            elif {TRAILER_ID, FORKLIFT_ID}.issubset(overlapping_classes):
+            elif {ID_TRAILER, ID_FORKLIFT}.issubset(overlapping_classes):
                 # Your logic: Trailer always wins
-                new_labels[pi] = TRAILER_ID
+                new_labels[pi] = ID_TRAILER
                 changed_ids += 1
 
             # --- Rule 4: Handle 2-way Truck & Forklift overlaps ---
-            elif {TRUCK_ID, FORKLIFT_ID}.issubset(overlapping_classes):
-                idx_tr = point_to_class_map[TRUCK_ID]
+            elif {ID_TRUCK, ID_FORKLIFT}.issubset(overlapping_classes):
+                idx_tr = point_to_class_map[ID_TRUCK]
 
                 if idx_tr in truck_to_trailer_map:
                     idx_tl = truck_to_trailer_map[idx_tr]
@@ -2524,10 +2511,10 @@ def assign_label_by_L_shape(
                     dz_pt = zg - cz_tr
 
                     if L_tr.contains(Point(dx_pt, dz_pt)):
-                        new_labels[pi] = TRUCK_ID
+                        new_labels[pi] = ID_TRUCK
                         changed_ids += 1
                     else:
-                        new_labels[pi] = FORKLIFT_ID
+                        new_labels[pi] = ID_FORKLIFT
                         changed_ids += 1
 
         # --- Priority 2: Your New Two-Stage General Logic ---
@@ -2696,17 +2683,15 @@ def main(trucksc, indice, truckscenesyaml, args, config):
 
     ############################ Define learning indexes ##########################################
     # Define the numeric index for the 'Unknown' class
-    # Assuming key 36 maps to 'Unknown' in labels and learning_map[36] is 15
     unknown_label_key = 36
     UNKNOWN_LEARNING_INDEX = learning_map.get(unknown_label_key, 15)
 
     # Define the numeric index for the 'Background' class
-    # Assuming key 37 maps to 'Background' in labels and learning_map[37] is 16
     background_label_key = 37
-    BACKGROUND_LEARNING_INDEX = learning_map.get(background_label_key, 16)
+    BACKGROUND_LEARNING_INDEX = learning_map.get(background_label_key, 13)
 
     free_label_key = 38
-    FREE_LEARNING_INDEX = learning_map.get(free_label_key, 17)
+    FREE_LEARNING_INDEX = learning_map.get(free_label_key, 14)
 
     ############################ Mapping from Category name to learning id  and vice versa ############################
     # Create a mapping from category name (e.g., "car") to learning ID (e.g., 4)
@@ -2719,16 +2704,12 @@ def main(trucksc, indice, truckscenesyaml, args, config):
     # Create the reverse mapping from learning ID (e.g., 10) to name (e.g., "truck")
     learning_id_to_name = {int(k): v for k, v in truckscenesyaml['labels_16'].items()}
 
-    # Define the learning ID for the category we want to apply the Z-centroid check to
-    OTHER_VEHICLE_LEARNING_ID = category_name_to_learning_id.get('vehicle.other', 13)
+    TRUCK_ID = category_name_to_learning_id.get('vehicle.truck', 10)
+    TRAILER_ID = category_name_to_learning_id.get('vehicle.trailer', 9)
+    CAR_ID = category_name_to_learning_id.get('vehicle.car', 4)
+    OTHER_VEHICLE_ID = category_name_to_learning_id.get('vehicle.other', 5)
 
-    TRUCK_ID = category_name_to_learning_id.get('truck', 10)
-    TRAILER_ID = category_name_to_learning_id.get('trailer', 9)
-    CAR_ID = category_name_to_learning_id.get('car', 10)
-    OTHER_VEHICLE_ID = category_name_to_learning_id.get('other', 13)
-    BARRIER_ID = category_name_to_learning_id.get('barrier', 10)
-    PEDESTRIAN_ID = category_name_to_learning_id.get('pedestrian', 10)
-
+    print(f"TRUCK_ID: {TRUCK_ID}, TRAILER_ID: {TRAILER_ID}, CAR_ID: {CAR_ID}, OTHER_VEHICLE_ID: {OTHER_VEHICLE_ID}")
 
     ########################## Specify thresholds for later aggregation based on overlap #########################
 
@@ -4245,7 +4226,10 @@ def main(trucksc, indice, truckscenesyaml, args, config):
                 pt_labels=labels_before_refinement,
                 all_object_points=all_points_per_box,
                 dyn_points_in_boxes=points_in_boxes[0],
-                high_overlap_threshold=0.85
+                ID_TRAILER=TRAILER_ID,
+                ID_TRUCK=TRUCK_ID,
+                ID_FORKLIFT=OTHER_VEHICLE_ID,
+                high_overlap_threshold = 0.85,
             )
 
             # --- Step 4: Update the labels within our semantic dynamic points array ---
