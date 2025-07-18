@@ -9,12 +9,12 @@ import os
 # TRUCKSCENES_VERSION = 'v1.0-trainval'
 
 # Test
-TRUCKSCENES_DATA_ROOT = '/home/max/ssd/Masterarbeit/TruckScenes/test/v1.0-test'
-TRUCKSCENES_VERSION = 'v1.0-test'
+#TRUCKSCENES_DATA_ROOT = '/home/max/ssd/Masterarbeit/TruckScenes/test/v1.0-test'
+#TRUCKSCENES_VERSION = 'v1.0-test'
 
 # Mini
-#TRUCKSCENES_DATA_ROOT = '/home/max/ssd/Masterarbeit/TruckScenes/mini/v1.0-mini'
-#TRUCKSCENES_VERSION = 'v1.0-mini'
+TRUCKSCENES_DATA_ROOT = '/home/max/ssd/Masterarbeit/TruckScenes/mini/v1.0-mini'
+TRUCKSCENES_VERSION = 'v1.0-mini'
 
 OUTPUT_FILENAME = 'annotations.json'
 
