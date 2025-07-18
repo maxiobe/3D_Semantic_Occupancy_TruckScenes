@@ -1949,6 +1949,9 @@ def calculate_3d_overlap_ratio_pytorch3d(boxes1_params: np.ndarray, boxes2_param
     # Add a small epsilon to avoid division by zero
     overlap_ratio_matrix_gpu = intersection_vol_gpu / (min_volume_matrix + 1e-6)
 
+    # Clip the values to a maximum of 1.0 to correct for numerical inaccuracies
+    overlap_ratio_matrix_gpu = torch.clamp(overlap_ratio_matrix_gpu, max=1.0)
+
     return overlap_ratio_matrix_gpu.cpu().numpy()
 
 def get_object_overlap_signature_BATCH(frame_data, target_obj_idx_in_frame, min_threshold=0.01):
