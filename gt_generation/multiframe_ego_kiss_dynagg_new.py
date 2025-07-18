@@ -51,19 +51,17 @@ CLASS_COLOR_MAP = {
     2: [1.0, 0.6, 0.0],  # bicycle - orange
     3: [0.5, 0.0, 0.5],  # bus - purple
     4: [0.0, 0.0, 1.0],  # car - blue
-    5: [0.3, 0.3, 0.0],  # construction_vehicle - olive
+    5: [0.3, 0.3, 0.0],  # other_vehicle - olive
     6: [1.0, 0.0, 1.0],  # motorcycle - magenta
     7: [1.0, 1.0, 0.0],  # pedestrian - yellow
     8: [1.0, 0.5, 0.5],  # traffic_cone - light red
     9: [0.5, 0.5, 0.0],  # trailer - mustard
     10: [0.0, 1.0, 0.0],  # truck - green
-    11: [0.2, 0.8, 0.8],  # ego_vehicle - cyan
+    11: [0.2, 0.8, 0.8],  # animal - cyan
     12: [1.0, 0.8, 0.0],  # traffic_sign - gold
-    13: [0.4, 0.4, 0.8],  # other_vehicle - steel blue
+    13: [0.4, 0.4, 0.8],  # background - steel blue
     14: [0.0, 0.5, 0.5],  # train - teal
     15: [0.8, 0.8, 0.8],  # Unknown - light gray
-    16: [0.0, 1.0, 1.0],  # Background - bright cyan
-    # (Assuming this is your FREE_LEARNING_INDEX or a general background for free/unobserved)
 }
 DEFAULT_COLOR = [0.3, 0.3, 0.3]  # Default color for labels not in map (darker gray)
 
@@ -2682,15 +2680,11 @@ def main(trucksc, indice, truckscenesyaml, args, config):
         raise NotImplementedError(f"The split '{args.split}' is not a valid or recognized split.")
 
     ############################ Define learning indexes ##########################################
-    # Define the numeric index for the 'Unknown' class
-    unknown_label_key = 36
-    UNKNOWN_LEARNING_INDEX = learning_map.get(unknown_label_key, 15)
-
     # Define the numeric index for the 'Background' class
-    background_label_key = 37
+    background_label_key = 36
     BACKGROUND_LEARNING_INDEX = learning_map.get(background_label_key, 13)
 
-    free_label_key = 38
+    free_label_key = 37
     FREE_LEARNING_INDEX = learning_map.get(free_label_key, 14)
 
     ############################ Mapping from Category name to learning id  and vice versa ############################
@@ -2832,7 +2826,11 @@ def main(trucksc, indice, truckscenesyaml, args, config):
         # Convert original category names to numeric learning IDs
         converted_object_category = []
         for category_name in original_object_category_names:
-            numeric_label = category_name_to_learning_id.get(category_name, UNKNOWN_LEARNING_INDEX)
+            if category_name in category_name_to_learning_id:
+                numeric_label = category_name_to_learning_id[category_name]
+            else:
+                print(f"⚠️ Warning: Category '{category_name}' not found in mapping. Assigning as Background.")
+                numeric_label = BACKGROUND_LEARNING_INDEX
             converted_object_category.append(numeric_label)
 
         ###################################### get manual boxes for terminal scenes ###################################
@@ -2854,7 +2852,7 @@ def main(trucksc, indice, truckscenesyaml, args, config):
                 for box in manual_boxes:
                     boxes_ego.append(box)
                     manual_category_name = box.name
-                    numeric_label = category_name_to_learning_id.get(manual_category_name, UNKNOWN_LEARNING_INDEX)
+                    numeric_label = category_name_to_learning_id.get(manual_category_name, BACKGROUND_LEARNING_INDEX)
                     converted_object_category.append(numeric_label)
 
         ####################### Assign object tokens for manual boxes #####################################
@@ -4011,7 +4009,7 @@ def main(trucksc, indice, truckscenesyaml, args, config):
 
         for keyframe_obj_idx, current_object_token in enumerate(current_keyframe_object_tokens):
             class_id = current_keyframe_object_categories[keyframe_obj_idx]
-            class_name = learning_id_to_name.get(class_id, 'Unknown')  # Safely get the name
+            class_name = learning_id_to_name.get(class_id, 'background')  # Safely get the name
             short_token = current_object_token.split('-')[0]
 
             print(f"  Processing dynamic object: {class_name} ('{short_token}...') for keyframe {i}...")
@@ -4021,7 +4019,7 @@ def main(trucksc, indice, truckscenesyaml, args, config):
 
             if signature_at_keyframe_i:
                 token_to_name_map = {
-                    tok: learning_id_to_name.get(cat_id, 'Unknown')
+                    tok: learning_id_to_name.get(cat_id, 'background')
                     for tok, cat_id in zip(current_keyframe_object_tokens, current_keyframe_object_categories)
                 }
                 sig_str = ", ".join([f"(ratio={ratio:.4f}, dist={dist:.2f}m, {learning_id_to_name.get(cat_id, '?')}, {yaw:.4f} rad)"
@@ -4430,14 +4428,11 @@ def main(trucksc, indice, truckscenesyaml, args, config):
                     dense_voxels_with_semantic_voxelcoords[:, 2] = np.clip(dense_voxels_with_semantic_voxelcoords[:, 2],
                                                                            0, occ_size[2] - 1)
 
-                    # Populate the final occupancy_grid
-                    # Handle cases where multiple dense points might map to the same voxel cell
-                    # by taking the label of the first one encountered (due to np.unique)
+
                     unique_final_vox_indices, unique_idx_map = np.unique(dense_voxels_with_semantic_voxelcoords[:, :3],
                                                                          axis=0, return_index=True)
                     labels_for_unique_final_voxels = dense_voxels_with_semantic_voxelcoords[unique_idx_map, 3]
 
-                    # Initialize 3D occupancy grid with the "Unknown" or "Background" label (e.g. 16)
                     occupancy_grid = np.full(occ_size, FREE_LEARNING_INDEX, dtype=np.uint8)
 
                     if unique_final_vox_indices.shape[0] > 0:
@@ -4492,7 +4487,6 @@ def main(trucksc, indice, truckscenesyaml, args, config):
                 dense_voxels_with_semantic_voxelcoords[:, 2] = np.clip(dense_voxels_with_semantic_voxelcoords[:, 2], 0,
                                                                        occ_size[2] - 1)
 
-                # Initialize 3D occupancy grid with the "Unknown" or "Background" label (e.g. 16)
                 occupancy_grid = np.full(occ_size, FREE_LEARNING_INDEX, dtype=np.uint8)
                 if dense_voxels_with_semantic_voxelcoords.shape[0] > 0:
                     occupancy_grid[

@@ -35,9 +35,8 @@ labels:
   33: 'static_object.traffic_sign' # New in truckscenes
   34: 'vehicle.other' # New in truckscenes
   35: 'vehicle.ego_trailer' # New in truckscenes
-  36: 'Unknown' # New in truckscenes - used for aggregating dynamic objects from manual annotation e.g. cranes
-  37: 'Background' # New inb truckscenes
-  38: 'Free'
+  36: 'Background' # New inb truckscenes
+  37: 'Free'
 labels_16:
   0: 'noise'
   1: 'barrier'
@@ -54,7 +53,6 @@ labels_16:
   12: 'traffic_sign'
   13: 'background'
   14: 'free'
-  15: 'Unknown'
 learning_map:
   5: 0
   7: 0
@@ -83,6 +81,5 @@ learning_map:
   23: 10
   1: 11
   33: 12
-  37: 13
-  38: 14
-  36: 15
+  36: 13
+  37: 14
