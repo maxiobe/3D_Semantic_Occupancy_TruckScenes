@@ -509,9 +509,7 @@ def denoise_pointcloud(pcd: o3d.geometry.PointCloud, filter_mode: str, config: d
                 kept_indices = np.array([], dtype=int)
 
         final_count = np.asarray(filtered_pcd.points).shape[0]
-        # --- 2. REMOVED internal location_msg = "point cloud" ---
 
-        # --- 3. Use the passed location_msg argument here ---
         print(f"Filtering {location_msg} with filter mode {filter_mode}. Reduced from {initial_count} to {final_count} points.")
 
     except Exception as e:
@@ -519,8 +517,141 @@ def denoise_pointcloud(pcd: o3d.geometry.PointCloud, filter_mode: str, config: d
         filtered_pcd = initial_pcd
         kept_indices = np.arange(initial_count)
 
-        # Ensure return type matches definition
     return filtered_pcd, kept_indices
+
+
+def denoise_pointcloud_advanced(
+        pcd: o3d.geometry.PointCloud,
+        filter_mode: str,
+        config: dict,
+        location_msg: str = "point cloud",
+        preserve_ground: bool = True
+) -> Tuple[o3d.geometry.PointCloud, np.ndarray]:
+    """
+    Applies advanced noise filtering with optional ground preservation and
+    correctly implemented distance-based logic.
+    - For SOR: Global statistics are used with local thresholds.
+    - For ROR: The cloud is split to use different radii.
+    """
+    initial_count = np.asarray(pcd.points).shape[0]
+    if initial_count == 0 or filter_mode == 'none':
+        return pcd, np.arange(initial_count)
+
+    original_points_np = np.asarray(pcd.points)
+    kept_filter_indices = np.arange(initial_count)
+
+    final_keep_mask = np.ones(initial_count, dtype=bool)
+
+    if config.get('distance_split', False):
+        print(f"Applying distance-based filtering (mode: '{filter_mode}') at '{location_msg}'...")
+
+        # --- 1. Create distance masks to define near and far points ---
+        distances = np.linalg.norm(original_points_np, axis=1)
+        near_mask = distances <= config['filter_distance_threshold']
+
+        if filter_mode in ['sor', 'both']:
+            print("Applying distance-based sor filtering...")
+            # Pass 1: Aggressive settings for NEAR points
+            _, ind_near = pcd.remove_statistical_outlier(
+                nb_neighbors=config['sor_nb_neighbors'], std_ratio=config['sor_std_ratio']
+            )
+            keep_mask_near_sor = np.zeros(initial_count, dtype=bool)
+            keep_mask_near_sor[ind_near] = True
+
+            # Pass 2: Lenient settings for FAR points
+            _, ind_far = pcd.remove_statistical_outlier(
+                nb_neighbors=config['sor_nb_neighbors'], std_ratio=config['sor_std_ratio_far']
+            )
+            keep_mask_far_sor = np.zeros(initial_count, dtype=bool)
+            keep_mask_far_sor[ind_far] = True
+
+            # Combine results: Use aggressive mask for near points, lenient for far points
+            final_keep_mask = np.where(near_mask, keep_mask_near_sor, keep_mask_far_sor)
+
+        if filter_mode in ['ror', 'both']:
+            print("Applying ror filtering...")
+            # If 'both', filter the subset of points already kept by SOR
+            # Otherwise, filter the original point cloud
+            pcd_for_ror = pcd.select_by_index(np.where(final_keep_mask)[0])
+            original_indices_for_ror = np.where(final_keep_mask)[0]
+
+            distances_for_ror = distances[original_indices_for_ror]
+            near_mask_for_ror = distances_for_ror <= config['filter_distance_threshold']
+
+            # Get indices relative to the pcd_for_ror subset
+            original_indices_near_ror = np.where(near_mask_for_ror)[0]
+            original_indices_far_ror = np.where(~near_mask_for_ror)[0]
+
+            # Filter subsets
+            pcd_near = pcd_for_ror.select_by_index(original_indices_near_ror)
+            _, kept_rel_near = pcd_near.remove_radius_outlier(nb_points=config['ror_nb_points'],
+                                                              radius=config['ror_radius'])
+
+            pcd_far = pcd_for_ror.select_by_index(original_indices_far_ror)
+            _, kept_rel_far = pcd_far.remove_radius_outlier(nb_points=config['ror_nb_points'],
+                                                            radius=config['ror_radius_far'])
+
+            # Map relative indices back to the original_indices_for_ror
+            kept_abs_indices_near = original_indices_for_ror[original_indices_near_ror[kept_rel_near]]
+            kept_abs_indices_far = original_indices_for_ror[original_indices_far_ror[kept_rel_far]]
+
+            # Create a new mask for the ROR pass and update the final mask
+            ror_keep_mask = np.zeros(initial_count, dtype=bool)
+            ror_keep_mask[kept_abs_indices_near] = True
+            ror_keep_mask[kept_abs_indices_far] = True
+            final_keep_mask &= ror_keep_mask
+
+        kept_filter_indices = np.where(final_keep_mask)[0]
+
+    else:  # Fallback to a single global filter
+        # (Your original global filter logic would go here)
+        print(f"Applying global filter '{filter_mode}' at '{location_msg}'...")
+        if filter_mode == 'sor':
+            _, kept_filter_indices = pcd.remove_statistical_outlier(nb_neighbors=config['sor_nb_neighbors'],
+                                                                    std_ratio=config['sor_std_ratio'])
+        elif filter_mode == 'ror':
+            _, kept_filter_indices = pcd.remove_radius_outlier(nb_points=config['ror_nb_points'],
+                                                               radius=config['ror_radius'])
+
+        elif filter_mode == 'both':
+            sor_filtered_pcd, sor_ind = pcd.remove_statistical_outlier(
+                nb_neighbors=config['sor_nb_neighbors'],
+                std_ratio=config['sor_std_ratio']
+            )
+            if np.asarray(sor_filtered_pcd.points).shape[0] > 0:
+                filtered_pcd, ror_ind = sor_filtered_pcd.remove_radius_outlier(
+                    nb_points=config['ror_nb_points'],
+                    radius=config['ror_radius']
+                )
+                kept_filter_indices = np.array(sor_ind)[ror_ind]
+            else:
+                kept_filter_indices = np.array([], dtype=int)
+
+    # --- Ground Plane Preservation ---
+    if preserve_ground:
+        ground_mask = get_ground_plane_mask(
+            original_points_np,
+            config['ground_z_min_threshold'],
+            config['ground_z_max_threshold']
+        )
+        ground_indices = np.where(ground_mask)[0]
+
+        num_ground_saved = np.setdiff1d(ground_indices, kept_filter_indices).size
+        if num_ground_saved > 0:
+            print(f"  -> Preserved {num_ground_saved} ground points that would have been filtered.")
+
+        final_kept_indices = np.union1d(kept_filter_indices, ground_indices)
+    else:
+        final_kept_indices = kept_filter_indices
+
+    # Ensure indices are integers for Open3D
+    final_kept_indices = final_kept_indices.astype(int)
+
+    filtered_pcd = pcd.select_by_index(final_kept_indices)
+    final_count = np.asarray(filtered_pcd.points).shape[0]
+    print(f"Filtering {location_msg}. Reduced from {initial_count} to {final_count} points.")
+
+    return filtered_pcd, final_kept_indices
 
 
 def in_range_mask(points, pc_range):
@@ -3197,7 +3328,7 @@ def main(trucksc, indice, truckscenesyaml, args, config):
         print(f"Total points labeled as dynamic for MapMOS input (annotated dynamic + ego): {total_mapmos_dynamic_labels}")
 
         ############################### Visualize if specified in arguments ###########################################
-        if args.vis_static_pc and i % 5 == 0:
+        if args.vis_static_pc:
             visualize_pointcloud_bbox(pc_with_semantic_ego_unfiltered,
                                       boxes=boxes_ego,
                                       title=f"Fused static sensor PC + BBoxes + Ego BBox - Frame {i}",
@@ -3229,7 +3360,7 @@ def main(trucksc, indice, truckscenesyaml, args, config):
             if args.vis_lidar_intensity_filtered:
                 visualize_pointcloud_bbox(pc_ego,
                                                   boxes=boxes_ego,
-                                                  title=f"Fused filtered static sensor PC + BBoxes + Ego BBox - Frame {i}",
+                                                  title=f"Fused filtered static sensor PC after lidar intensity filtering + BBoxes + Ego BBox - Frame {i}",
                                                   self_vehicle_range=self_range,
                                                   vis_self_vehicle=True)
             #######################################################################################################
@@ -3238,11 +3369,19 @@ def main(trucksc, indice, truckscenesyaml, args, config):
 
         ############################# Apply filtering to static points in ego frame #################################
         if args.filter_static_pc and args.filter_mode != 'none':
+            print(f"Applying geometric filter ('{args.filter_mode}') to the aggregated static map...")
             pcd_static = o3d.geometry.PointCloud()
             pcd_static.points = o3d.utility.Vector3dVector(pc_ego[:, :3])
-            filtered_pcd_static, kept_indices = denoise_pointcloud(
+            """filtered_pcd_static, kept_indices = denoise_pointcloud(
                 pcd_static, args.filter_mode, config, location_msg=f"static ego points at frame {i}"
+            )"""
+            filtered_pcd_static, kept_indices = denoise_pointcloud_advanced(
+                pcd=pcd_static,
+                filter_mode=args.filter_mode,
+                config=config,
+                location_msg="aggregated static points"
             )
+
             pc_ego = np.asarray(filtered_pcd_static.points)
             pc_ego_unfiltered_sensors = pc_ego_unfiltered_sensors[kept_indices]
 
@@ -3252,7 +3391,7 @@ def main(trucksc, indice, truckscenesyaml, args, config):
 
         ############################ Visualization #############################################################
         if args.vis_static_pc and args.filter_static_pc:
-            visualize_pointcloud_bbox(pc_with_semantic_ego_unfiltered,
+            visualize_pointcloud_bbox(pc_ego,
                                       boxes=boxes_ego,
                                       title=f"Fused filtered static sensor PC (filter mode {args.filter_mode}) + BBoxes + Ego BBox - Frame {i}",
                                       self_vehicle_range=self_range,
