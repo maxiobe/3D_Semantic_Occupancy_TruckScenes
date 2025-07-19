@@ -2964,16 +2964,25 @@ def main(trucksc, indice, truckscenesyaml, args, config):
         ################################################ Bounding box just for filtering dynamic map ###################
         gt_bbox_3d_points_in_boxes_cpu_max_enlarged = gt_bbox_3d_unmodified.copy()
 
-        dims_filter = dims * 1.15
+        percentage_factor_max = 1.15
+        fixed_increase_m = 0.3
+
+        increase_from_percentage = dims * (percentage_factor_max - 1.0)
+
+        final_increase = np.maximum(increase_from_percentage, fixed_increase_m)
+
+        dims_filter = dims + final_increase
 
         # enlarge width of cars and trucks as mirrors often not included in bounding boxes --> avoid artifacts
         width_scale_car = 1.20
-        width_scale_truck = 1.3
+        width_scale_truck = 1.25
         for index, cat in enumerate(original_object_category_names):
             if cat == 'vehicle.car':
-                dims_filter[index, 0] = dims[index, 0] * width_scale_car
+                special_width = dims[index, 0] * width_scale_car
+                dims_filter[index, 0] = np.maximum(dims_filter[index, 0], special_width)
             elif cat == 'vehicle.truck':
-                dims_filter[index, 0] = dims[index, 0] * width_scale_truck
+                special_width = dims[index, 0] * width_scale_truck
+                dims_filter[index, 0] = np.maximum(dims_filter[index, 0], special_width)
 
         gt_bbox_3d_points_in_boxes_cpu_max_enlarged[:, 6] += np.pi / 2.  # adjust yaw angles by 90 degrees for points_in_boxes_cpu()
         gt_bbox_3d_points_in_boxes_cpu_max_enlarged[:, 2] -= dims[:, 2] / 2. # needed as points_in_boxes_cpu() expects bottom center of box
@@ -2982,7 +2991,7 @@ def main(trucksc, indice, truckscenesyaml, args, config):
 
 
         ############################### Visualize if specified in arguments ###########################################
-        if args.vis_raw_pc:
+        if args.vis_raw_pc and i % 5 == 0:
             visualize_pointcloud_bbox(sensor_fused_pc.points.T,
                                       boxes=boxes_ego,
                                       title=f"Fused raw sensor PC + BBoxes + Ego BBox - Frame {i}",
@@ -3019,7 +3028,7 @@ def main(trucksc, indice, truckscenesyaml, args, config):
         ##############################################################################################################
 
         ############################### Visualize if specified in arguments ###########################################
-        if args.vis_raw_pc and args.filter_raw_pc:
+        if args.vis_raw_pc and args.filter_raw_pc and i % 5 == 0:
             visualize_pointcloud_bbox(sensor_fused_pc.points.T,
                                       boxes=boxes_ego,
                                       title=f"Fused filtered raw sensor PC (filter mode {args.filter_mode}) + BBoxes + Ego BBox - Frame {i}",
@@ -3184,7 +3193,7 @@ def main(trucksc, indice, truckscenesyaml, args, config):
         dynamic_mask_max_enlarged = point_box_mask_max_enlarged.any(dim=-1)
 
         num_dynamic_points_filter = dynamic_mask_max_enlarged.sum().item()
-        print(f"Number of dynamic points to filter with enlarged box: {num_dynamic_points_filter}")
+        print(f"Number of dynamic points to filter with max enlarged box: {num_dynamic_points_filter}")
 
         static_mask_max_enlarged = ~dynamic_mask_max_enlarged # Get static mask (inverse)
 
@@ -3200,7 +3209,7 @@ def main(trucksc, indice, truckscenesyaml, args, config):
             f"Number of semantic static points extracted: {pc_with_semantic_ego_unfiltered.shape} with sensor_ids {pc_with_semantic_ego_unfiltered_sensors.shape}")
 
         ############################### Visualize if specified in arguments ###########################################
-        if args.vis_static_pc:
+        if args.vis_static_pc and i % 5 == 0:
             visualize_pointcloud_bbox(pc_with_semantic_ego_unfiltered,
                                       boxes=boxes_ego,
                                       title=f"Fused static sensor PC + BBoxes + Ego BBox - Frame {i}",
@@ -3411,148 +3420,160 @@ def main(trucksc, indice, truckscenesyaml, args, config):
     ##############################################################################################
     ##################################### MapMOS #################################################
 
-    # mos_config = MOSConfig(voxel_size_belief=0.25, delay_mos=10, ...)
-    # odometry_config = OdometryConfig(voxel_size=0.5, ...)
-    # data_config = DataConfig(max_range=100.0, ...)
-    # pipeline_config = { "mos": mos_config, "odom": odometry_config, "data": data_config }
+    if args.run_mapmos:
 
-    in_memory_dataset_mapmos = None
-    mapmos_pipeline = None
-    estimated_poses_kiss = None
-    log_dir_mapmos = osp.join(save_path, scene_name, "mapmos_logs")
+        print("Running mapmos to refine static map.")
 
-    mapmos_labels_per_scan = [frame_dict['mapmos_per_point_labels'] for frame_dict in dict_list]
+        # mos_config = MOSConfig(voxel_size_belief=0.25, delay_mos=10, ...)
+        # odometry_config = OdometryConfig(voxel_size=0.5, ...)
+        # data_config = DataConfig(max_range=100.0, ...)
+        # pipeline_config = { "mos": mos_config, "odom": odometry_config, "data": data_config }
 
-    try:
-        print("Initializing InMemoryDatasetMapMOS...")
+        in_memory_dataset_mapmos = None
+        mapmos_pipeline = None
+        estimated_poses_kiss = None
+        log_dir_mapmos = osp.join(save_path, scene_name, "mapmos_logs")
 
-        in_memory_dataset_mapmos = InMemoryDatasetMapMOS(
-            lidar_scans=raw_pc_list,
-            scan_timestamps=lidar_timestamps,
-            labels_per_scan=mapmos_labels_per_scan,
-            gt_global_poses=gt_relative_poses_arr,  # Optional
-            sequence_id=f"{scene_name}_mapmos_run"
-        )
-        print(f"InMemoryDatasetMapMOS initialized with {len(in_memory_dataset_mapmos)} scans.")
-    except Exception as e:
-        print(f"Error creating InMemoryDatasetMapMos: {e}. Skipping MapMOS.")
+        mapmos_labels_per_scan = [frame_dict['mapmos_per_point_labels'] for frame_dict in dict_list]
 
-    config_path_mapmos = None
-    if in_memory_dataset_mapmos:
         try:
-            print(f"Initializing MapMOSPipeline with weights: {weights_path_mapmos}")
+            print("Initializing InMemoryDatasetMapMOS...")
 
-            if not weights_path_mapmos.is_file():
-                raise FileNotFoundError(f"MapMOS weights not found at: {weights_path_mapmos}")
-
-            mapmos_pipeline = MapMOSPipeline(
-                dataset=in_memory_dataset_mapmos,
-                weights=weights_path_mapmos,
-                config=config_path_mapmos,
-                visualize=False,
-                save_ply=True,
-                save_kitti=False,
-                n_scans=-1,
-                jump=0
+            in_memory_dataset_mapmos = InMemoryDatasetMapMOS(
+                lidar_scans=raw_pc_list,
+                scan_timestamps=lidar_timestamps,
+                labels_per_scan=mapmos_labels_per_scan,
+                gt_global_poses=gt_relative_poses_arr,  # Optional
+                sequence_id=f"{scene_name}_mapmos_run"
             )
+            print(f"InMemoryDatasetMapMOS initialized with {len(in_memory_dataset_mapmos)} scans.")
+        except Exception as e:
+            print(f"Error creating InMemoryDatasetMapMos: {e}. Skipping MapMOS.")
 
-            print("MapMOS pipeline initialized.")
+        config_path_mapmos = None
+        if in_memory_dataset_mapmos:
+            try:
+                print(f"Initializing MapMOSPipeline with weights: {weights_path_mapmos}")
 
-            mapmos_start_time = time.time()
-            print("Running MapMOS pipeline...")
-            run_output, all_frame_predictions = mapmos_pipeline.run()
-            mapmos_end_time = time.time()
-            print(f"MapMOS pipeline finished in {mapmos_end_time - mapmos_start_time:.2f} seconds.")
+                if not weights_path_mapmos.is_file():
+                    raise FileNotFoundError(f"MapMOS weights not found at: {weights_path_mapmos}")
 
-            # Process or print results
-            if hasattr(run_output, 'print') and callable(getattr(run_output, 'print')):
-                print("Printing MapMOS results:")
-                run_output.print()
-            else:
-                print(
-                    "MapMOS run completed. Inspect 'mapmos_pipeline_instance' or 'run_output' for results if available.")
-
-            """for frame_data in all_frame_predictions:
-                scan_idx = frame_data["scan_index"]
-                points = frame_data["points"]
-                predicted_labels = frame_data["predicted_labels"]  # These are your belief_labels_query
-                gt_labels = frame_data["gt_labels"]  # These are your query_labels
-
-                print(
-                    f"Scan Index: {scan_idx}, Points shape: {points.shape}, Predicted Labels shape: {predicted_labels.shape}, GT Labels shape: {gt_labels.shape}")
-
-                visualize_mapmos_predictions(
-                    points_xyz=points,
-                    predicted_labels=predicted_labels,
-                    scan_index=scan_idx,
-                    window_title_prefix=f"MapMOS Output ({scene_name})"  # Using your scene_name
+                mapmos_pipeline = MapMOSPipeline(
+                    dataset=in_memory_dataset_mapmos,
+                    weights=weights_path_mapmos,
+                    config=config_path_mapmos,
+                    visualize=False,
+                    save_ply=True,
+                    save_kitti=False,
+                    n_scans=-1,
+                    jump=0
                 )
 
-                # Example: Filter dynamic points based on MapMOS prediction
-                # Assuming 1 means dynamic, 0 means static in predicted_labels
-                dynamic_points = points[predicted_labels == 1]
-                static_points = points[predicted_labels == 0]
-                print(f"  - Found {dynamic_points.shape[0]} dynamic points and {static_points.shape[0]} static points.")"""
+                print("MapMOS pipeline initialized.")
 
-        except Exception as e:
-            print(f"Error during MapMOS pipeline execution: {e}")
+                mapmos_start_time = time.time()
+                print("Running MapMOS pipeline...")
+                run_output, all_frame_predictions = mapmos_pipeline.run()
+                mapmos_end_time = time.time()
+                print(f"MapMOS pipeline finished in {mapmos_end_time - mapmos_start_time:.2f} seconds.")
 
-    static_points_mapmos = []
-    static_points_mapmos_sensor_ids = []
+                # Process or print results
+                if hasattr(run_output, 'print') and callable(getattr(run_output, 'print')):
+                    print("Printing MapMOS results:")
+                    run_output.print()
+                else:
+                    print(
+                        "MapMOS run completed. Inspect 'mapmos_pipeline_instance' or 'run_output' for results if available.")
 
-    if all_frame_predictions:
-        print(f"\n--- Filtering static points for all {len(all_frame_predictions)} frames ---")
-        for frame_idx, frame_data in enumerate(all_frame_predictions):
-            original_points_in_frame = raw_pc_list[frame_idx]
-            original_points_in_frame_sensor_ids = raw_pc_list_sensor_ids[frame_idx]
+                """for frame_data in all_frame_predictions:
+                    scan_idx = frame_data["scan_index"]
+                    points = frame_data["points"]
+                    predicted_labels = frame_data["predicted_labels"]  # These are your belief_labels_query
+                    gt_labels = frame_data["gt_labels"]  # These are your query_labels
+    
+                    print(
+                        f"Scan Index: {scan_idx}, Points shape: {points.shape}, Predicted Labels shape: {predicted_labels.shape}, GT Labels shape: {gt_labels.shape}")
+    
+                    visualize_mapmos_predictions(
+                        points_xyz=points,
+                        predicted_labels=predicted_labels,
+                        scan_index=scan_idx,
+                        window_title_prefix=f"MapMOS Output ({scene_name})"  # Using your scene_name
+                    )
+    
+                    # Example: Filter dynamic points based on MapMOS prediction
+                    # Assuming 1 means dynamic, 0 means static in predicted_labels
+                    dynamic_points = points[predicted_labels == 1]
+                    static_points = points[predicted_labels == 0]
+                    print(f"  - Found {dynamic_points.shape[0]} dynamic points and {static_points.shape[0]} static points.")"""
 
-            # Condition 1: Point was considered STATIC in your input GT to MapMOS
-            input_gt_is_static_mask = (mapmos_labels_per_scan[frame_idx].flatten() == 0)
+            except Exception as e:
+                print(f"Error during MapMOS pipeline execution: {e}")
 
-            # Condition 2: Point was NOT predicted as DYNAMIC by MapMOS
-            mapmos_predicted_labels = frame_data["predicted_labels"]
-            mapmos_not_predicted_dynamic_mask = (
+        static_points_refined = []
+        static_points_refined_sensor_ids = []
+
+        if all_frame_predictions:
+            print(f"\n--- Filtering static points for all {len(all_frame_predictions)} frames ---")
+            for frame_idx, frame_data in enumerate(all_frame_predictions):
+                original_points_in_frame = raw_pc_list[frame_idx]
+                original_points_in_frame_sensor_ids = raw_pc_list_sensor_ids[frame_idx]
+
+                # Condition 1: Point was considered STATIC in your input GT to MapMOS
+                input_gt_is_static_mask = (mapmos_labels_per_scan[frame_idx].flatten() == 0)
+
+                # Condition 2: Point was NOT predicted as DYNAMIC by MapMOS
+                mapmos_predicted_labels = frame_data["predicted_labels"]
+                mapmos_not_predicted_dynamic_mask = (
+                        mapmos_predicted_labels != 1)  # True if MapMOS predicted 0 (static) or -1 (unclassified)
+
+                # Combine both conditions with logical AND
+                final_static_mask_for_frame = input_gt_is_static_mask & mapmos_not_predicted_dynamic_mask
+
+                # Apply the mask to get the static points for the current frame
+                static_points_this_frame = original_points_in_frame[final_static_mask_for_frame]
+                static_points_refined.append(static_points_this_frame)
+                static_points_this_frame_sensor_ids = original_points_in_frame_sensor_ids[final_static_mask_for_frame]
+                static_points_refined_sensor_ids.append(static_points_this_frame_sensor_ids)
+
+                assert static_points_this_frame.shape[0] == static_points_this_frame_sensor_ids.shape[0]
+
+            print(f"Static points list mapmos: {len(static_points_refined)} frames with sensor ids: {len(static_points_refined_sensor_ids)}")
+
+        """raw_pc_0 = raw_pc_list[0]
+    
+        # Condition 1: Point is NOT dynamic in your GT input to MapMOS
+        input_gt_is_static_mask = (mapmos_labels_per_scan[0].flatten() == 0)
+    
+        # Condition 2: Point is NOT classified as dynamic by MapMOS prediction
+        mapmos_predicted_labels = all_frame_predictions[0]["predicted_labels"]
+        mapmos_not_predicted_dynamic_mask = (
                     mapmos_predicted_labels != 1)  # True if MapMOS predicted 0 (static) or -1 (unclassified)
+    
+        # Combine both conditions: A point is truly static if both are true
+        final_static_mask = input_gt_is_static_mask & mapmos_not_predicted_dynamic_mask
+    
+        # Filter raw_pc_0 using this final static mask
+        static_points_from_raw_pc_0 = raw_pc_0[final_static_mask]
+    
+        print(f"--- Filtering for Frame 0 ---")
+        print(f"Original number of points in raw_pc_0: {raw_pc_0.shape[0]}")
+        print(f"Number of points static according to your input GT: {np.sum(input_gt_is_static_mask)}")
+        print(f"Number of points NOT predicted as dynamic by MapMOS: {np.sum(mapmos_not_predicted_dynamic_mask)}")
+        print(f"Number of points satisfying BOTH static conditions: {static_points_from_raw_pc_0.shape[0]}")
+    
+    
+        pcd_static_vis = o3d.geometry.PointCloud()
+        pcd_static_vis.points = o3d.utility.Vector3dVector(static_points_from_raw_pc_0[:, :3])
+        pcd_static_vis.paint_uniform_color([0.0, 0.0, 1.0])  # Blue for these static points
+        o3d.visualization.draw_geometries([pcd_static_vis],
+                                          window_name=f"Final Static Points (Frame 0)")"""
 
-            # Combine both conditions with logical AND
-            final_static_mask_for_frame = input_gt_is_static_mask & mapmos_not_predicted_dynamic_mask
-
-            # Apply the mask to get the static points for the current frame
-            static_points_this_frame = original_points_in_frame[final_static_mask_for_frame]
-            static_points_mapmos.append(static_points_this_frame)
-            static_points_this_frame_sensor_ids = original_points_in_frame_sensor_ids[final_static_mask_for_frame]
-            static_points_mapmos_sensor_ids.append(static_points_this_frame_sensor_ids)
-
-    print(f"Static points list mapmos: {len(static_points_mapmos)} frames with sensor ids: {len(static_points_mapmos_sensor_ids)}")
-
-    """raw_pc_0 = raw_pc_list[0]
-
-    # Condition 1: Point is NOT dynamic in your GT input to MapMOS
-    input_gt_is_static_mask = (mapmos_labels_per_scan[0].flatten() == 0)
-
-    # Condition 2: Point is NOT classified as dynamic by MapMOS prediction
-    mapmos_predicted_labels = all_frame_predictions[0]["predicted_labels"]
-    mapmos_not_predicted_dynamic_mask = (
-                mapmos_predicted_labels != 1)  # True if MapMOS predicted 0 (static) or -1 (unclassified)
-
-    # Combine both conditions: A point is truly static if both are true
-    final_static_mask = input_gt_is_static_mask & mapmos_not_predicted_dynamic_mask
-
-    # Filter raw_pc_0 using this final static mask
-    static_points_from_raw_pc_0 = raw_pc_0[final_static_mask]
-
-    print(f"--- Filtering for Frame 0 ---")
-    print(f"Original number of points in raw_pc_0: {raw_pc_0.shape[0]}")
-    print(f"Number of points static according to your input GT: {np.sum(input_gt_is_static_mask)}")
-    print(f"Number of points NOT predicted as dynamic by MapMOS: {np.sum(mapmos_not_predicted_dynamic_mask)}")
-    print(f"Number of points satisfying BOTH static conditions: {static_points_from_raw_pc_0.shape[0]}")
-
-
-    pcd_static_vis = o3d.geometry.PointCloud()
-    pcd_static_vis.points = o3d.utility.Vector3dVector(static_points_from_raw_pc_0[:, :3])
-    pcd_static_vis.paint_uniform_color([0.0, 0.0, 1.0])  # Blue for these static points
-    o3d.visualization.draw_geometries([pcd_static_vis],
-                                      window_name=f"Final Static Points (Frame 0)")"""
+    else:
+        print("Proceeding without running MapMOS pipeline.")
+        # Define default lists that will be used if MapMOS is skipped
+        static_points_refined = unrefined_pc_ego_list  # Default to the initial static points
+        static_points_refined_sensor_ids = unrefined_pc_ego_list_sensor_ids
 
     ###############################################################################################
     ################# Refinement using KISS-ICP ###################################################
@@ -3702,7 +3723,7 @@ def main(trucksc, indice, truckscenesyaml, args, config):
             print("Applying refined poses from KISS-ICP...")
             refined_lidar_pc_list = []
 
-            for idx, points_ego in enumerate(unrefined_pc_ego_list): #(static_points_mapmos): # (unrefined_pc_ego_list):
+            for idx, points_ego in enumerate(static_points_refined): #(static_points_mapmos): # (unrefined_pc_ego_list):
                 pose = estimated_poses_kiss[idx]
                 print(f"Applying refined pose {idx}: {pose}")
 
@@ -3863,7 +3884,7 @@ def main(trucksc, indice, truckscenesyaml, args, config):
     else:
         print("ICP refinement is ON. Using KISS-ICP refined points for aggregation.")
         source_pc_list_all_frames = refined_lidar_pc_list
-        source_pc_sids_list_all_frames = unrefined_pc_ego_list_sensor_ids
+        source_pc_sids_list_all_frames = static_points_refined_sensor_ids
 
     #################################### Filtering based on if only keyframes should be used ###########################
     print(f"Static map aggregation: --static_map_keyframes_only is {args.static_map_keyframes_only}")
@@ -4842,6 +4863,10 @@ if __name__ == '__main__':
     parse.add_argument('--icp_refinement', action='store_true', help='Enable ICP refinement')
     parse.add_argument('--initial_guess_mode', type=str, default='none', choices=['none', 'ego_pose', 'imu'])
     parse.add_argument('--pose_error_plot', action='store_true', help='Plot pose error')
+
+
+    ####################### MapMOS ########################################################
+    parse.add_argument('--run_mapmos', action='store_true', help='Enable the MapMOS pipeline to refine the static map.')
 
     ####################### Meshing #####################################################
     parse.add_argument('--meshing', action='store_true', help='Enable meshing')
