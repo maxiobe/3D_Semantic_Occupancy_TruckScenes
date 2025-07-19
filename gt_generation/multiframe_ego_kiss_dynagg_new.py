@@ -3155,8 +3155,39 @@ def main(trucksc, indice, truckscenesyaml, args, config):
         num_ego_points = inside_ego_mask.sum().item()
         print(f"Number of points on ego vehicle: {num_ego_points}")
 
+        ################################# Dynamic point filtering of static map with max enlarged boxes##################
+
+        points_in_boxes_max_enlarged = points_in_boxes_cpu(
+            torch.from_numpy(sensor_fused_pc.points.T[:, :3][np.newaxis, :, :]),
+            torch.from_numpy(gt_bbox_3d_points_in_boxes_cpu_max_enlarged[np.newaxis, :])
+        )
+
+        dynamic_mask_max_enlarged = points_in_boxes_max_enlarged[0].any(dim=-1)
+
+        only_in_max_enlarged_mask = dynamic_mask_max_enlarged & ~dynamic_mask
+        num_points_max_enlarged = only_in_max_enlarged_mask.sum().item()
+
+        print(f"Number of points captured only by the max enlarged box: {num_points_max_enlarged}")
+
+        ############################### Combine masks ##############################
+        ego_filter_mask = ~inside_ego_mask
+
+        initial_static_points_mask = static_mask & ego_filter_mask
+        final_static_map_mask = initial_static_points_mask & ~dynamic_mask_max_enlarged
+
+        pc_ego_unfiltered = sensor_fused_pc.points.T[final_static_map_mask]
+        pc_ego_unfiltered_sensors = sensor_ids_points.copy().T[final_static_map_mask]
+        print(
+            f"Number of static points extracted: {pc_ego_unfiltered.shape} with sensor_ids {pc_ego_unfiltered_sensors.shape}")
+
+        pc_with_semantic_ego_unfiltered = pc_with_semantic[final_static_map_mask]
+        pc_with_semantic_ego_unfiltered_sensors = sensor_ids_points.copy().T[final_static_map_mask]
+
+        print(
+            f"Number of semantic static points extracted: {pc_with_semantic_ego_unfiltered.shape} with sensor_ids {pc_with_semantic_ego_unfiltered_sensors.shape}")
+
         ###################################### Generate labels for mapmos as gt ####################################
-        dynamic_mask_mapmos = dynamic_mask | inside_ego_mask
+        dynamic_mask_mapmos = dynamic_mask | inside_ego_mask | dynamic_mask_max_enlarged
 
         current_frame_mapmos_labels = dynamic_mask_mapmos.cpu().numpy().astype(np.int32).reshape(-1, 1)
         assert current_frame_mapmos_labels.shape[0] == sensor_fused_pc.points.T.shape[0], \
@@ -3164,49 +3195,6 @@ def main(trucksc, indice, truckscenesyaml, args, config):
 
         total_mapmos_dynamic_labels = dynamic_mask_mapmos.sum().item()
         print(f"Total points labeled as dynamic for MapMOS input (annotated dynamic + ego): {total_mapmos_dynamic_labels}")
-
-        ################################# Process static and dynamic points to aggregate ###########################
-        ego_filter_mask = ~inside_ego_mask
-
-        points_mask = static_mask & ego_filter_mask
-
-        pc_ego_unfiltered = sensor_fused_pc.points.T[points_mask]
-        pc_ego_unfiltered_sensors = sensor_ids_points.copy().T[points_mask]
-        print(
-            f"Number of static points extracted: {pc_ego_unfiltered.shape} with sensor_ids {pc_ego_unfiltered_sensors.shape}")
-
-        pc_with_semantic_ego_unfiltered = pc_with_semantic[points_mask]
-        pc_with_semantic_ego_unfiltered_sensors = sensor_ids_points.copy().T[points_mask]
-        print(
-            f"Number of semantic static points extracted: {pc_with_semantic_ego_unfiltered.shape} with sensor_ids {pc_with_semantic_ego_unfiltered_sensors.shape}")
-
-
-        ################################# Dynamic point filtering of static map with max enlarged boxes##################
-
-        print(f"Filtering static point cloud with max enlarged boxes")
-        points_in_boxes_max_enlarged = points_in_boxes_cpu(torch.from_numpy(pc_ego_unfiltered[:, :3][np.newaxis, :, :]),
-                                              torch.from_numpy(gt_bbox_3d_points_in_boxes_cpu_max_enlarged[np.newaxis,
-                                                               :]))
-
-        point_box_mask_max_enlarged = points_in_boxes_max_enlarged[0]
-
-        dynamic_mask_max_enlarged = point_box_mask_max_enlarged.any(dim=-1)
-
-        num_dynamic_points_filter = dynamic_mask_max_enlarged.sum().item()
-        print(f"Number of dynamic points to filter with max enlarged box: {num_dynamic_points_filter}")
-
-        static_mask_max_enlarged = ~dynamic_mask_max_enlarged # Get static mask (inverse)
-
-        pc_ego_unfiltered = pc_ego_unfiltered[static_mask_max_enlarged]
-        pc_ego_unfiltered_sensors = pc_ego_unfiltered_sensors[static_mask_max_enlarged]
-
-        print(
-            f"Number of static points extracted: {pc_ego_unfiltered.shape} with sensor_ids {pc_ego_unfiltered_sensors.shape}")
-
-        pc_with_semantic_ego_unfiltered = pc_with_semantic_ego_unfiltered[static_mask_max_enlarged]
-        pc_with_semantic_ego_unfiltered_sensors = pc_with_semantic_ego_unfiltered_sensors[static_mask_max_enlarged]
-        print(
-            f"Number of semantic static points extracted: {pc_with_semantic_ego_unfiltered.shape} with sensor_ids {pc_with_semantic_ego_unfiltered_sensors.shape}")
 
         ############################### Visualize if specified in arguments ###########################################
         if args.vis_static_pc and i % 5 == 0:
@@ -3521,7 +3509,6 @@ def main(trucksc, indice, truckscenesyaml, args, config):
 
                 # Condition 1: Point was considered STATIC in your input GT to MapMOS
                 input_gt_is_static_mask = (mapmos_labels_per_scan[frame_idx].flatten() == 0)
-
                 # Condition 2: Point was NOT predicted as DYNAMIC by MapMOS
                 mapmos_predicted_labels = frame_data["predicted_labels"]
                 mapmos_not_predicted_dynamic_mask = (
