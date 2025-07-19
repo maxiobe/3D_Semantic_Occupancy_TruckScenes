@@ -409,13 +409,13 @@ def get_images(trucksc, my_sample, sensor):
 
 def main(trucksc, testset=False):
     sensors = ['LIDAR_LEFT', 'LIDAR_RIGHT', 'LIDAR_TOP_FRONT', 'LIDAR_TOP_LEFT', 'LIDAR_TOP_RIGHT', 'LIDAR_REAR']
-    my_scene = trucksc.scene[0]
+    my_scene = trucksc.scene[2]
     scene_name = my_scene['name']
     print(f"\n--- Scene '{scene_name}' ---")
 
     first_sample_token = my_scene['first_sample_token']
+    print(f"First sample token: {first_sample_token}")
     my_sample = trucksc.get('sample', first_sample_token)
-    print(my_sample)
 
     sample_idx = 0
     while True:
@@ -473,8 +473,6 @@ def main(trucksc, testset=False):
 
         sensor_fused_pc = get_pointwise_fused_pointcloud(trucksc, my_sample, allowed_sensors=sensors)
 
-        print(sensor_fused_pc.points.shape)
-
         pc_fused_ego = sensor_fused_pc.points.T
 
         camera = 'CAMERA_RIGHT_FRONT'
@@ -509,6 +507,7 @@ def main(trucksc, testset=False):
         next_sample_token = my_sample['next']
         if next_sample_token != '':
             my_sample = trucksc.get('sample', next_sample_token)
+            print(f"Next sample token: {next_sample_token}")
             sample_idx += 1
         else:
             break
