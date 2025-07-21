@@ -2889,7 +2889,7 @@ def main(trucksc, indice, truckscenesyaml, args, config):
     TRUCK_ID = category_name_to_learning_id.get('vehicle.truck', 10)
     TRAILER_ID = category_name_to_learning_id.get('vehicle.trailer', 9)
     CAR_ID = category_name_to_learning_id.get('vehicle.car', 4)
-    OTHER_VEHICLE_ID = category_name_to_learning_id.get('vehicle.other', 5)
+    OTHER_VEHICLE_ID = category_name_to_learning_id.get('vehicle.other', 13)
 
     print(f"TRUCK_ID: {TRUCK_ID}, TRAILER_ID: {TRAILER_ID}, CAR_ID: {CAR_ID}, OTHER_VEHICLE_ID: {OTHER_VEHICLE_ID}")
 
