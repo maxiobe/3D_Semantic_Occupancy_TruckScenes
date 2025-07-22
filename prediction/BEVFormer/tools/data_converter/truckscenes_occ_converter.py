@@ -8,6 +8,7 @@ from typing import List, Tuple, Union
 
 from shapely.geometry import MultiPoint, box
 from mmdet3d.core.bbox.box_np_ops import points_cam2img
+from mmdet3d.datasets import NuScenesDataset
 import simplejson as json
 
 from truckscenes.truckscenes import TruckScenes
@@ -263,8 +264,48 @@ def _fill_occ_trainval_infos(trsc,
             info['sweeps'] = sweeps
 
 
-        if not test and 'anns' in sample:
-            pass
+        if not test:
+            annotations = [trsc.get('sample_annotation', token) for token in sample['anns']]
+
+            locs = np.array([b.center for b in boxes]).reshape(-1, 3)
+            dims = np.array([b.wlh for b in boxes]).reshape(-1, 3)
+            rots = np.array([b.orientation.yaw_pitch_roll[0]
+                             for b in boxes]).reshape(-1, 1)
+
+            velocity = np.array(
+                [trsc.box_velocity(token)[:2] for token in sample['anns']])
+
+            valid_flag = np.array(
+                [(anno['num_lidar_pts'] + anno['num_radar_pts']) > 0
+                 for anno in annotations],
+                dtype=bool).reshape(-1)
+
+            # convert velo from global to lidar
+            for i in range(len(boxes)):
+                velo = np.array([*velocity[i], 0.0])
+                velo = velo @ np.linalg.inv(ego2global_rot_mat).T @ np.linalg.inv(
+                    primary_lidar2ego_rot_mat).T
+                velocity[i] = velo[:2]
+
+            names = [b.name for b in boxes]
+            for i in range(len(names)):
+                if names[i] in NuScenesDataset.NameMapping:
+                    names[i] = NuScenesDataset.NameMapping[names[i]]
+            names = np.array(names)
+
+            # we need to convert rot to SECOND format.
+            gt_boxes = np.concatenate([locs, dims, -rots - np.pi / 2], axis=1)
+            assert len(gt_boxes) == len(
+                annotations), f'{len(gt_boxes)}, {len(annotations)}'
+
+            info['gt_boxes'] = gt_boxes
+            info['gt_names'] = names
+            info['gt_velocity'] = velocity.reshape(-1, 2)
+            info['num_lidar_pts'] = np.array(
+                [a['num_lidar_pts'] for a in annotations])
+            info['num_radar_pts'] = np.array(
+                [a['num_radar_pts'] for a in annotations])
+            info['valid_flag'] = valid_flag
 
         if sample['scene_token'] in train_scenes:
             train_trsc_infos.append(info)

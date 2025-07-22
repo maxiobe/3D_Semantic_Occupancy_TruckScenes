@@ -9,7 +9,9 @@ plugin_dir = 'projects/mmdet3d_plugin/'
 # If point cloud range is changed, the models should also change their point
 # cloud range accordingly
 point_cloud_range = [-40, -40, -1.0, 40, 40, 5.4]
+#point_cloud_range = [-150, -150, -5, 150, 150, 20]
 voxel_size = [0.2, 0.2, 8]
+#voxel_size = [0.2, 0.2, 0.2]
 
 
 
@@ -29,12 +31,15 @@ input_modality = dict(
     use_external=True)
 
 _dim_ = 256
+#_dim_ = 128
 _pos_dim_ = _dim_//2
 _ffn_dim_ = _dim_*2
 _num_levels_ = 2
-bev_h_ = 200
-bev_w_ = 200
-queue_length = 4 # each sequence contains `queue_length` frames.
+#bev_h_ = 200
+bev_h_ = 1500
+#bev_w_ = 200
+bev_w_ = 1500
+queue_length = 2 # each sequence contains `queue_length` frames.
 model = dict(
     type='BEVFormerOcc',
     use_grid_mask=True,
@@ -81,8 +86,10 @@ model = dict(
             loss_weight=1.0),
         transformer=dict(
             type='TransformerOcc',
-            pillar_h=16,
+            #pillar_h=16,
+            pillar_h=125,
             num_classes=18,
+            num_cams=4,
             norm_cfg=dict(type='BN', ),
             norm_cfg_3d=dict(type='BN3d', ),
             use_3d=True,
@@ -106,6 +113,7 @@ model = dict(
                             num_levels=1),
                         dict(
                             type='SpatialCrossAttention',
+                            num_cams=4,
                             pc_range=point_cloud_range,
                             deformable_attention=dict(
                                 type='MSDeformableAttention3D',
