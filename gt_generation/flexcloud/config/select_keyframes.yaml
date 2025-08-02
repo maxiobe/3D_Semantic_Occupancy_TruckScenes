@@ -1,0 +1,8 @@
+# keyframe_interpolation:
+odom_format: "kitti"                    # Format of the odometry data, supported: "kitti", "glim"
+stddev_threshold: 5.0                   # Threshold for the standard deviation of the global positions to be used as keyframes
+keyframe_delta_x: 0.0   #2.0                # Minimum distance between keyframes in x direction
+keyframe_delta_angle: 0.0  #0.5              # Minimum angle between keyframes
+downsample_resolution: 0.1              # Resolution for downsampled point cloud
+interpolate: False #True                       # Interpolate between keyframes, otherwise nearest neighbor selection
+interp_pos_delta_xyz: 0.25              # Maximum distance between interpolated poses
