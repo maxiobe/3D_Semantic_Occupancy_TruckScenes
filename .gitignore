@@ -211,3 +211,5 @@ prediction/BEVFormer/ckpts/
 
 # Results of Kiss/ Mapmos
 gt_generation/results
+
+gt_generation/pipeline_io
