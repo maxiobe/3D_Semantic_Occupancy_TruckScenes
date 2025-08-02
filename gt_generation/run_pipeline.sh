@@ -76,29 +76,36 @@ do
         # Add other flags as needed
     conda deactivate
 
-    # --- Step 2: FlexCloud Processing ---
-    echo "Activating environment: $ENV_FLEXCLOUD for Part 2..."
-    conda activate "$ENV_FLEXCLOUD"
-    python "${PIPELINE_DIR}/part2_run_flexcloud.py" "$SCENE_IO_DIR"
-    conda deactivate
+    # --- Check for success flag before continuing ---
+    FLAG_FILE="${SCENE_IO_DIR}/part1_success.flag"
+    if [ -f "$FLAG_FILE" ]; then
+        echo "Part 1 successful, proceeding to Part 2 and 3..."
 
-    # --- Step 3: Post-processing with Open3D ---
-    echo "Activating environment: $ENV_POSTPROCESS for Part 3..."
-    conda activate "$ENV_POSTPROCESS"
+        # --- Step 2: FlexCloud Processing ---
+        echo "Activating environment: $ENV_FLEXCLOUD for Part 2..."
+        conda activate "$ENV_FLEXCLOUD"
+        python "${PIPELINE_DIR}/part2_run_flexcloud.py" "$SCENE_IO_DIR"
+        conda deactivate
 
-    python "${PIPELINE_DIR}/part3_postprocess.py" \
-        --dataroot "$DATA_ROOT" \
-        --version "$VERSION" \
-        --config_path "$CONFIG_PATH" \
-        --save_path "$SAVE_PATH_GT" \
-        --label_mapping "$LABEL_MAPPING" \
-        --scene_io_dir "$SCENE_IO_DIR" \
-        --icp_refinement \
-        --static_map_keyframes_only \
-        --dynamic_map_keyframes_only
+        # --- Step 3: Post-processing with Open3D ---
+        echo "Activating environment: $ENV_POSTPROCESS for Part 3..."
+        conda activate "$ENV_POSTPROCESS"
 
-    conda deactivate
+        python "${PIPELINE_DIR}/part3_postprocess.py" \
+            --dataroot "$DATA_ROOT" \
+            --version "$VERSION" \
+            --config_path "$CONFIG_PATH" \
+            --save_path "$SAVE_PATH_GT" \
+            --label_mapping "$LABEL_MAPPING" \
+            --scene_io_dir "$SCENE_IO_DIR" \
+            --icp_refinement \
+            --static_map_keyframes_only \
+            --dynamic_map_keyframes_only
 
+        conda deactivate
+    else
+        echo "Skipping Part 2 and 3 for scene $i as it was not in the desired split."
+    fi
     # --- (Optional) Clean up the intermediate files for this scene ---
     #echo "--- Cleaning up intermediate files for scene $i ---"
     #rm -rf "$SCENE_IO_DIR"

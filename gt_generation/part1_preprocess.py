@@ -82,18 +82,23 @@ def main(trucksc, indice, truckscenesyaml, args, config):
     ############################## Data split handling #############################################
     if args.split == 'train':
         if scene_name not in splits.train:
+            print(f"--- Scene '{scene_name}' is not in split '{args.split}', skipping. ---")
             return
     elif args.split == 'val':
         if scene_name not in splits.val:
+            print(f"--- Scene '{scene_name}' is not in split '{args.split}', skipping. ---")
             return
     elif args.split == 'test':
         if scene_name not in splits.test:
+            print(f"--- Scene '{scene_name}' is not in split '{args.split}', skipping. ---")
             return
     elif args.split == 'mini_train':
         if scene_name not in splits.mini_train:
+            print(f"--- Scene '{scene_name}' is not in split '{args.split}', skipping. ---")
             return
     elif args.split == 'mini_val':
         if scene_name not in splits.mini_val:
+            print(f"--- Scene '{scene_name}' is not in split '{args.split}', skipping. ---")
             return
     elif args.split in ['all', 'mini']:
         pass
@@ -1362,6 +1367,11 @@ def main(trucksc, indice, truckscenesyaml, args, config):
     print(f"\n--- Part 1 Complete ---")
     print(f"Saved pipeline context to {context_file_path}")
     print(f"FlexCloud inputs are ready in: {save_dir_flexcloud}")
+
+    print("Creating success flag for Part 1...")
+    flag_file_path = os.path.join(args.scene_io_dir, "part1_success.flag")
+    with open(flag_file_path, 'w') as f:
+        f.write('success')
 
 
 
