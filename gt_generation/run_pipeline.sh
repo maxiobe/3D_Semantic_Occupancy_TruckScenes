@@ -1,0 +1,108 @@
+#!/bin/bash
+# Exit immediately if a command exits with a non-zero status.
+set -e
+
+# --- Configuration ---
+# Define the names of your Conda environments
+ENV_PREPROCESS="occ_kiss_p3d"
+ENV_FLEXCLOUD="flexcloud-stable"
+ENV_POSTPROCESS="occ_kiss_p3d"
+
+# For step 1
+CONFIG_PATH="config_truckscenes.yaml"
+LABEL_MAPPING="truckscenes.yaml"
+SAVE_PATH_GT="/home/max/ssd/Masterarbeit/TruckScenes/trainval/v1.0-trainval/gt/all_sensors_icp_validation"
+DATA_ROOT="/home/max/ssd/Masterarbeit/TruckScenes/trainval/v1.0-trainval"
+VERSION="v1.0-trainval"
+SPLIT="train"
+START=0
+END=1
+LOAD_MODE="pointwise"
+
+# Define the root directory for your Python scripts
+PIPELINE_DIR="/home/max/Desktop/Masterarbeit/Python/3D_Semantic_Occupancy_TruckScenes/gt_generation"
+
+# Define a single base directory for all temporary I/O
+IO_BASE_DIR="${PIPELINE_DIR}/pipeline_io"
+
+# --- Main Setup ---
+echo "--- Pipeline Setup ---"
+# Source Conda functions to make 'conda' command available in the script
+source ~/miniforge3/etc/profile.d/conda.sh
+# Create the base I/O directory
+mkdir -p "$IO_BASE_DIR"
+echo "Base I/O directory is at: $IO_BASE_DIR"
+
+# --- Main Processing Loop ---
+for (( i=$START; i<$END; i++ ))
+do
+    # Create a specific directory for the current scene's intermediate files
+    SCENE_IO_DIR="${IO_BASE_DIR}/scene_${i}"
+    echo -e "\n--------------------------------------------------"
+    echo "--- Processing Scene Index: $i ---"
+    echo "--- Using temporary directory: $SCENE_IO_DIR ---"
+    echo "--------------------------------------------------"
+    mkdir -p "$SCENE_IO_DIR"
+
+    # --- Step 1: Pre-processing with Open3D ---
+    echo "Activating environment: $ENV_PREPROCESS for Part 1..."
+    conda activate "$ENV_PREPROCESS"
+    python "${PIPELINE_DIR}/part1_preprocess.py" \
+        --dataroot "$DATA_ROOT" \
+        --version "$VERSION" \
+        --config_path "$CONFIG_PATH" \
+        --save_path "$SAVE_PATH_GT" \
+        --label_mapping "$LABEL_MAPPING" \
+        --split "$SPLIT" \
+        --idx "$i" \
+        --load_mode "$LOAD_MODE" \
+        --scene_io_dir "$SCENE_IO_DIR" \
+        --icp_refinement \
+        --initial_guess_mode ego_pose \
+        --pose_error_plot \
+        --filter_lidar_intensity \
+        --filter_mode both \
+        --filter_static_pc \
+        #--run_mapmos \
+        #--vis_raw_pc \
+        #--vis_static_pc \
+        #--vis_static_pc_global \
+        #--vis_lidar_intensity_filtered \
+        #--filter_raw_pc \
+        #--vis_aggregated_static_ego_i_pc \
+        #--vis_aggregated_static_ego_ref_pc \
+        #--vis_aggregated_static_global_pc \
+        #--vis_aggregated_raw_pc_ego_i \
+        # Add other flags as needed
+    conda deactivate
+
+    # --- Step 2: FlexCloud Processing ---
+    echo "Activating environment: $ENV_FLEXCLOUD for Part 2..."
+    conda activate "$ENV_FLEXCLOUD"
+    python "${PIPELINE_DIR}/part2_run_flexcloud.py" "$SCENE_IO_DIR"
+    conda deactivate
+
+    # --- Step 3: Post-processing with Open3D ---
+    echo "Activating environment: $ENV_POSTPROCESS for Part 3..."
+    conda activate "$ENV_POSTPROCESS"
+
+    python "${PIPELINE_DIR}/part3_postprocess.py" \
+        --dataroot "$DATA_ROOT" \
+        --version "$VERSION" \
+        --config_path "$CONFIG_PATH" \
+        --save_path "$SAVE_PATH_GT" \
+        --label_mapping "$LABEL_MAPPING" \
+        --scene_io_dir "$SCENE_IO_DIR" \
+        --icp_refinement \
+        --static_map_keyframes_only \
+        --dynamic_map_keyframes_only
+
+    conda deactivate
+
+    # --- (Optional) Clean up the intermediate files for this scene ---
+    #echo "--- Cleaning up intermediate files for scene $i ---"
+    #rm -rf "$SCENE_IO_DIR"
+
+done
+
+echo -e "\n✅✅✅ Pipeline finished successfully! ✅✅✅"
