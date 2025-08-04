@@ -1,5 +1,6 @@
 import numpy as np
 import os
+from tqdm import tqdm
 import torch
 import time
 import yaml
@@ -13,15 +14,14 @@ from mmcv.ops.points_in_boxes import (points_in_boxes_cpu)
 from pyquaternion import Quaternion
 import matplotlib.pyplot as plt
 from truckscenes.utils.geometry_utils import transform_matrix
-from utils.data_utils import parse_single_annotation_file
 from utils.visualization import visualize_pointcloud_bbox, visualize_pointcloud
 from utils.pointcloud_processing import denoise_pointcloud, denoise_pointcloud_advanced, get_weather_intensity_filter_mask, integrate_imu_for_relative_motion
-from utils.geometry_utils import transform_points
+from utils.geometry_utils import transform_points, transform_imu_to_ego
 from utils.constants import *
 from kiss_icp.pipeline import OdometryPipeline
 from mapmos.pipeline import MapMOSPipeline
 from utils.custom_datasets import InMemoryDataset, InMemoryDatasetMapMOS
-from utils.data_utils import save_gnss_to_directory, save_poses_to_kitti_format, save_pcds_to_directory
+from utils.data_utils import save_gnss_to_directory, save_poses_to_kitti_format, save_pcds_to_directory, save_gnss_to_single_file, parse_single_annotation_file
 
 def main(trucksc, indice, truckscenesyaml, args, config):
     ########################## Extract parameters from config and args #############################################
@@ -61,6 +61,17 @@ def main(trucksc, indice, truckscenesyaml, args, config):
     ############################## Load config for cameras for camera visibility mask ###############################
     cameras = config['cameras']
     print(f"Cameras: {cameras}")
+
+    ############################## Get IMU calibration data ######################################
+    sensor_token_imu = truckscenes.field2token('sensor', 'channel', 'XSENSE_CHASSIS')[0]
+
+    calibrated_sensor_record_imu = None
+    for cs_record in truckscenes.calibrated_sensor:
+        if cs_record['sensor_token'] == sensor_token_imu:
+            calibrated_sensor_record_imu = cs_record
+            break
+
+    print(f"Calibrated imu chassis sensor record: {calibrated_sensor_record_imu}")
 
     ############################# Start processing scene #########################################
     my_scene = trucksc.scene[indice]
@@ -134,6 +145,7 @@ def main(trucksc, indice, truckscenesyaml, args, config):
 
     ######################## Looping over the generated groups and save data in a dict_list ############################
     dict_list = []
+    dict_list_rosbag = []
 
     reference_ego_pose = None
     ref_ego_from_global = None
@@ -661,6 +673,17 @@ def main(trucksc, indice, truckscenesyaml, args, config):
         ################## Save all information into a dict  ########################
         ref_sd = trucksc.get('sample_data', sample['sample_data_token'])
 
+        imu_record_raw = trucksc.getclosest('ego_motion_chassis', sample['timestamp'])
+
+        imu_record_transformed = transform_imu_to_ego(imu_record_raw, calibrated_sensor_record_imu)
+
+        frame_dict_rosbag = {
+            "sample_timestamp": sample['timestamp'],
+            "lidar_pc_for_icp_ego_i": pc_for_icp,
+            "imu_record": imu_record_transformed,
+            "ego_pose": ego_pose_i,
+        }
+
         frame_dict = {
             "sample_timestamp": sample['timestamp'],
             "scene_name": scene_name,
@@ -668,6 +691,7 @@ def main(trucksc, indice, truckscenesyaml, args, config):
             "is_key_frame": sample['is_key_frame'],
             "converted_object_category": converted_object_category,
             "boxes_ego": boxes_ego,
+            "ego_motion_chassis": imu_record_transformed,
             "gt_bbox_3d_points_in_boxes_cpu_max_enlarged": gt_bbox_3d_points_in_boxes_cpu_max_enlarged,
             "gt_bbox_3d_points_in_boxes_cpu_enlarged": gt_bbox_3d_points_in_boxes_cpu_enlarged,
             "gt_bbox_3d_overlap_enlarged": gt_bbox_3d_overlap_enlarged,
@@ -690,6 +714,8 @@ def main(trucksc, indice, truckscenesyaml, args, config):
 
         ########################## Save dictionary into a list ###############################
         dict_list.append(frame_dict)
+
+        dict_list_rosbag.append(frame_dict_rosbag)
 
     ################# Prepare Lists for Static Scene Points (in Reference Ego Frame) ########################.
 
@@ -1246,6 +1272,30 @@ def main(trucksc, indice, truckscenesyaml, args, config):
         source_pc_sids_list_all_frames = static_points_refined_sensor_ids
 
     #################################### FlexCloud ###################################################################
+
+    io_dir = args.scene_io_dir
+    save_dir_flexcloud = os.path.join(io_dir, "flexcloud_io")
+    pos_dir = os.path.join(save_dir_flexcloud, "gnss_poses")
+    odom_path = os.path.join(save_dir_flexcloud, "odom/slam_poses.txt")
+    pcd_dir = os.path.join(save_dir_flexcloud, "point_clouds")
+    output_dir = os.path.join(save_dir_flexcloud, "output_keyframes")
+    pcd_dir_transformed = os.path.join(save_dir_flexcloud, "pcd_transformed")
+
+    os.makedirs(pos_dir, exist_ok=True)
+    os.makedirs(pcd_dir, exist_ok=True)
+    os.makedirs(output_dir, exist_ok=True)
+    os.makedirs(pcd_dir_transformed, exist_ok=True)
+    os.makedirs(os.path.dirname(odom_path), exist_ok=True)
+
+    final_pc_path = os.path.join(save_dir_flexcloud, "aggregated_cloud.pcd")
+    agg_pc = np.concatenate(source_pc_list_all_frames, axis=0)
+    print(agg_pc.shape)
+
+    pcd_agg = o3d.geometry.PointCloud()
+    pcd_agg.points = o3d.utility.Vector3dVector(agg_pc[:, :3])
+    o3d.io.write_point_cloud(final_pc_path, pcd_agg)
+
+
     lidar_timestamps_flexcloud = [frame_dict['sample_timestamp'] / 1e6 for frame_dict in dict_list]
 
     # 1. Get your data from KISS-ICP and the dataset
@@ -1259,7 +1309,9 @@ def main(trucksc, indice, truckscenesyaml, args, config):
     std_dev_placeholder = np.array([0.1, 0.1, 0.1])
     for frame_dict in dict_list:
         # 1. Get the full 4x4 transformation matrix
-        transform_matrix_global_from_ego = frame_dict['global_from_ego_i']
+        #transform_matrix_global_from_ego = frame_dict['global_from_ego_i']
+
+        transform_matrix_global_from_ego = frame_dict['ego_ref_from_ego_i']
 
         # 2. Extract just the position (x, y, z) from the last column
         position = transform_matrix_global_from_ego[:3, 3]
@@ -1269,6 +1321,9 @@ def main(trucksc, indice, truckscenesyaml, args, config):
 
         # 4. Append the correct 6-element array to the list
         gnss_data_save.append(gnss_entry)
+
+    file_path_gnss_all = os.path.join(args.scene_io_dir, 'flexcloud_io/all_gnss_data_poses.txt')
+    save_gnss_to_single_file(gnss_data_save, file_path_gnss_all)
 
     if len(gnss_data_save) > 1:
         print("Padding data lists to ensure interpolation coverage...")
@@ -1312,21 +1367,6 @@ def main(trucksc, indice, truckscenesyaml, args, config):
     config_path_select_keyframes = "/flexcloud/config/select_keyframes.yaml"
     config_path_pcd_georef = "/flexcloud/config/pcd_georef.yaml"
 
-    # 2. Define temporary directories for I/O
-    io_dir = args.scene_io_dir
-    save_dir_flexcloud = os.path.join(io_dir, "flexcloud_io")
-    pos_dir = os.path.join(save_dir_flexcloud, "gnss_poses")
-    odom_path = os.path.join(save_dir_flexcloud, "odom/slam_poses.txt")
-    pcd_dir = os.path.join(save_dir_flexcloud, "point_clouds")
-    output_dir = os.path.join(save_dir_flexcloud, "output_keyframes")
-    pcd_dir_transformed = os.path.join(save_dir_flexcloud, "pcd_transformed")
-
-    os.makedirs(pos_dir, exist_ok=True)
-    os.makedirs(pcd_dir, exist_ok=True)
-    os.makedirs(output_dir, exist_ok=True)
-    os.makedirs(pcd_dir_transformed, exist_ok=True)
-    os.makedirs(os.path.dirname(odom_path), exist_ok=True)
-
     # 3. Save your in-memory data to the temporary files
     save_poses_to_kitti_format(kiss_icp_poses_save, odom_path)
     save_gnss_to_directory(gnss_data_save, timestamps_save, pos_dir)
@@ -1363,6 +1403,45 @@ def main(trucksc, indice, truckscenesyaml, args, config):
         cameras=np.array(cameras, dtype=object),
         sensor_max_ranges_arr=sensor_max_ranges_arr,
         self_range=np.array(self_range, dtype=object)
+    )
+
+    print("Finished saving data dict")
+
+    # Get the first and last lidar timestamps
+    first_lidar_timestamp = dict_list[0]['sample_timestamp']
+    last_lidar_timestamp = dict_list[-1]['sample_timestamp']
+
+    # Define a time buffer (e.g., 1 second)
+    buffer_time = 1e6  # in microseconds
+
+    # Calculate the start and end timestamps for interpolation
+    start_timestamp_imu = first_lidar_timestamp - buffer_time
+    end_timestamp_imu = last_lidar_timestamp + buffer_time
+
+    # Define the desired IMU frequency (e.g., 100 Hz)
+    imu_freq = 100
+    # Calculate the time step in microseconds
+    time_step = int(1e6 / imu_freq)
+
+    # Create a new array of timestamps
+    high_freq_timestamps = np.arange(start_timestamp_imu, end_timestamp_imu, time_step)
+
+    # Use tqdm to show progress for the list comprehension
+    imu_data = [transform_imu_to_ego(truckscenes.getclosest("ego_motion_chassis", timest), calibrated_sensor_record_imu)
+                for timest in tqdm(high_freq_timestamps, desc="Fetching IMU Data")]
+    #print(IMU_data)
+
+    print("Saving data to create rosbag...")
+
+    context_file_path_rosbag = os.path.join(args.scene_io_dir, "preprocessed_data_rosbag.npz")
+    print(f"Saving data to {context_file_path_rosbag}")
+    np.savez_compressed(
+        context_file_path_rosbag,
+        dict_list=np.array(dict_list_rosbag, dtype=object),
+        poses_kiss_icp=poses_kiss_icp,
+        scene_name=scene_name,
+        save_path=save_path,
+        IMU_data=np.array(imu_data, dtype=object),
     )
     print(f"\n--- Part 1 Complete ---")
     print(f"Saved pipeline context to {context_file_path}")
