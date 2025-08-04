@@ -2,6 +2,7 @@ import open3d as o3d
 import numpy as np
 from typing import Any, Dict, List, Optional, Union, Tuple
 from copy import deepcopy
+from scipy.spatial.transform import Rotation
 
 # Function to perform poisson surface reconstruction on a given point cloud and returns a mesh representation of the point cloud, along with vertex info
 # Inputs pcd: input point cloud,

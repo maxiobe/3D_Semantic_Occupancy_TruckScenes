@@ -41,6 +41,42 @@ def save_gnss_to_directory(gnss_data, timestamps, output_dir):
     print(f"Saved {len(gnss_data)} GNSS poses to directory {output_dir}")
 
 
+def save_gnss_to_single_file(gnss_data, file_path):
+    """Saves all GNSS data entries into one file."""
+    with open(file_path, 'w') as f:
+        # gnss_data is a list of arrays, each of shape (6,)
+        for data_point in gnss_data:
+            # Format the data as a space-separated line
+            line = ' '.join(map(str, data_point))
+            f.write(line + '\n')
+    print(f"Saved {len(gnss_data)} GNSS poses to {file_path}")
+
+
+def load_kitti_poses(file_path):
+    """
+    Loads poses from a KITTI-style text file.
+    Each line is a flattened 3x4 matrix.
+    Returns a numpy array of shape (N, 4, 4).
+    """
+    if not os.path.exists(file_path):
+        print(f"Error: Pose file not found at {file_path}")
+        return np.array([])
+
+    data = np.loadtxt(file_path)
+
+    # Each row in the file has 12 numbers, reshape to (N, 3, 4)
+    poses_3x4 = data.reshape(-1, 3, 4)
+
+    # Create the bottom row for a 4x4 homogeneous matrix
+    bottom_row = np.array([0.0, 0.0, 0.0, 1.0]).reshape(1, 1, 4)
+    bottom_row_tiled = np.tile(bottom_row, (poses_3x4.shape[0], 1, 1))
+
+    # Stack to create the final (N, 4, 4) array
+    poses_4x4 = np.concatenate([poses_3x4, bottom_row_tiled], axis=1)
+
+    return poses_4x4
+
+
 def save_pointcloud_for_annotation(points_n_features, output_path):
     """
     Saves a point cloud to a .pcd file for annotation tools.

@@ -3,6 +3,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from typing import Any, Dict, List, Optional, Union, Tuple
 from .constants import *
+from pathlib import Path
 
 def visualize_pointcloud(points, colors=None, title="Point Cloud"):
     """
@@ -309,3 +310,97 @@ def visualize_mapmos_predictions(points_xyz: np.ndarray,
     print(f"  Unclassified points (gray): {np.sum(unclassified_mask)}")
 
     o3d.visualization.draw_geometries([pcd], window_name=f"{window_title_prefix} - Scan {scan_index}")
+
+
+def calculate_and_plot_pose_errors(poses_estimated, poses_reference, title_prefix, scene_name, save_dir,
+                                   show_plot=False):
+    """
+    Calculates and plots the translational and rotational errors between two sets of poses.
+
+    Args:
+        poses_estimated (np.ndarray): The set of estimated poses (N, 4, 4).
+        poses_reference (np.ndarray): The set of reference/ground truth poses (N, 4, 4).
+        title_prefix (str): A prefix for the plot title, e.g., "FlexCloud vs. GT".
+        scene_name (str): The name of the scene for saving.
+        save_dir (str or Path): The directory to save the plot in.
+        show_plot (bool): Whether to display the plot interactively.
+    """
+    if poses_estimated.shape != poses_reference.shape:
+        print(
+            f"Warning: Pose array shapes do not match. Estimated: {poses_estimated.shape}, Reference: {poses_reference.shape}. Cannot compare.")
+        return
+
+    print(f"\n--- Comparing {title_prefix} Poses ---")
+    trans_errors, rot_errors_rad = [], []
+    trans_errors_x, trans_errors_y, trans_errors_z = [], [], []
+
+    for k_idx in range(poses_estimated.shape[0]):
+        pose_est = poses_estimated[k_idx]
+        pose_ref = poses_reference[k_idx]
+
+        # Translational error
+        t_est = pose_est[:3, 3]
+        t_ref = pose_ref[:3, 3]
+        t_error_vec = t_ref - t_est
+        trans_errors.append(np.linalg.norm(t_error_vec))
+        trans_errors_x.append(t_error_vec[0])
+        trans_errors_y.append(t_error_vec[1])
+        trans_errors_z.append(t_error_vec[2])
+
+        # Rotational error
+        R_est = pose_est[:3, :3]
+        R_ref = pose_ref[:3, :3]
+        R_error = R_est.T @ R_ref
+        trace_val = np.trace(R_error)
+        clipped_arg = np.clip((trace_val - 1.0) / 2.0, -1.0, 1.0)
+        rot_errors_rad.append(np.arccos(clipped_arg))
+
+    # --- Print Statistics ---
+    print(f"  Average Translational Error : {np.mean(trans_errors):.4f} m")
+    print(f"  Median Translational Error  : {np.median(trans_errors):.4f} m")
+    print(f"  Average Rotational Error    : {np.mean(np.degrees(rot_errors_rad)):.4f} degrees")
+    print(f"  Median Rotational Error     : {np.median(np.degrees(rot_errors_rad)):.4f} degrees")
+
+    # --- Plotting ---
+    fig, axs = plt.subplots(2, 2, figsize=(17, 10))
+    fig.suptitle(f'Scene {scene_name}: {title_prefix} Pose Errors', fontsize=16)
+
+    # (Plotting code is identical to your original, just using generic variable names)
+    axs[0, 0].plot(trans_errors, label="Overall Trans. Error")
+    axs[0, 0].set_title('Overall Translational Error')
+    axs[0, 0].set_ylabel('Error (m)')
+    axs[0, 0].grid(True)
+    axs[0, 0].legend()
+
+    axs[0, 1].plot(np.degrees(rot_errors_rad), label="Overall Rot. Error")
+    axs[0, 1].set_title('Overall Rotational Error')
+    axs[0, 1].set_ylabel('Error (degrees)')
+    axs[0, 1].grid(True)
+    axs[0, 1].legend()
+
+    axs[1, 0].plot(trans_errors_x, label="X Error (Ref - Est)", alpha=0.9)
+    axs[1, 0].plot(trans_errors_y, label="Y Error (Ref - Est)", alpha=0.9)
+    axs[1, 0].axhline(0, color='black', linestyle='--', linewidth=0.7)
+    axs[1, 0].set_title('X & Y Translational Errors')
+    axs[1, 0].set_ylabel('Error (m)')
+    axs[1, 0].grid(True)
+    axs[1, 0].legend()
+
+    axs[1, 1].plot(trans_errors_z, label="Z Error (Ref - Est)")
+    axs[1, 1].axhline(0, color='black', linestyle='--', linewidth=0.7)
+    axs[1, 1].set_title('Z Translational Error')
+    axs[1, 1].set_ylabel('Error (m)')
+    axs[1, 1].grid(True)
+    axs[1, 1].legend()
+
+    plt.tight_layout(rect=[0, 0, 1, 0.95])
+
+    plot_save_dir = Path(save_dir) / scene_name
+    plot_save_dir.mkdir(parents=True, exist_ok=True)
+    plot_filename = plot_save_dir / f"errors_{title_prefix.replace(' ', '_')}.png"
+    plt.savefig(plot_filename)
+    print(f"Saved pose error plot to {plot_filename}")
+
+    if show_plot:
+        plt.show()
+    plt.close(fig)
