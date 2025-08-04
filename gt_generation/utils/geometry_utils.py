@@ -1,6 +1,7 @@
 import numpy as np
 from scipy.spatial.transform import Rotation, Slerp
 from scipy.interpolate import interp1d
+from pyquaternion import Quaternion
 
 def transform_points(points_n_features, transform_4x4):
     """
@@ -106,3 +107,79 @@ def transform_pointwise(points: np.ndarray, transforms: np.ndarray) -> np.ndarra
     points = np.squeeze(points)[:, :3]
 
     return points.T
+
+
+def transform_imu_to_ego(imu_record, imu_calibration):
+    """
+    Transforms all relevant IMU data from the sensor's frame to the ego vehicle's frame.
+
+    Args:
+        imu_record (dict): A single ego_motion_chassis record from TruckScenes.
+        imu_calibration (dict): The calibrated_sensor record for the IMU.
+
+    Returns:
+        dict: A new dictionary with all IMU data correctly represented in the ego vehicle frame.
+    """
+    # 1. Get the calibration rotation from the IMU's frame to the ego frame
+    q_ego_from_imu = Quaternion(imu_calibration['rotation'])
+
+    # 2. Transform MEASUREMENT VECTORS (acceleration, velocity, angular rate)
+    # These vectors are measured in the IMU's frame and need to be rotated to the ego frame.
+
+    # Linear Acceleration
+    vec_accel_imu = np.array([imu_record['ax'], imu_record['ay'], imu_record['az']])
+    vec_accel_ego = q_ego_from_imu.rotate(vec_accel_imu)
+
+    # Linear Velocity
+    vec_vel_imu = np.array([imu_record['vx'], imu_record['vy'], imu_record['vz']])
+    vec_vel_ego = q_ego_from_imu.rotate(vec_vel_imu)
+
+    # Angular Velocity
+    vec_rate_imu = np.array([imu_record['roll_rate'], imu_record['pitch_rate'], imu_record['yaw_rate']])
+    vec_rate_ego = q_ego_from_imu.rotate(vec_rate_imu)
+
+    # 3. Transform ABSOLUTE ORIENTATION (yaw, pitch, roll)
+    # This represents the IMU's orientation in the global frame. We must combine it
+    # with the calibration to find the EGO's orientation in the global frame.
+    q_yaw = Quaternion(axis=[0, 0, 1], angle=imu_record['yaw'])
+    q_pitch = Quaternion(axis=[0, 1, 0], angle=imu_record['pitch'])
+    q_roll = Quaternion(axis=[1, 0, 0], angle=imu_record['roll'])
+
+    # Orientation of the IMU in the global frame
+    q_imu_in_global = q_yaw * q_pitch * q_roll
+
+    # To get ego's orientation, we post-multiply by the inverse of the calibration rotation
+    # Formula: q_ego_in_global = q_imu_in_global * (q_ego_from_imu)^-1
+    q_ego_in_global = q_imu_in_global * q_ego_from_imu.inverse
+
+    # Extract the new yaw, pitch, and roll angles for the ego vehicle
+    ego_yaw, ego_pitch, ego_roll = q_ego_in_global.yaw_pitch_roll
+
+    # 4. Assemble the final dictionary with all data in the ego frame
+    transformed_data = {
+        # Transformed Linear Acceleration
+        'ax': vec_accel_ego[0],
+        'ay': vec_accel_ego[1],
+        'az': vec_accel_ego[2],
+
+        # Transformed Linear Velocity
+        'vx': vec_vel_ego[0],
+        'vy': vec_vel_ego[1],
+        'vz': vec_vel_ego[2],
+
+        # Transformed Angular Velocity
+        'roll_rate': vec_rate_ego[0],
+        'pitch_rate': vec_rate_ego[1],
+        'yaw_rate': vec_rate_ego[2],
+
+        # Transformed Absolute Orientation
+        'roll': ego_roll,
+        'pitch': ego_pitch,
+        'yaw': ego_yaw,
+
+        # Carry over metadata
+        'timestamp': imu_record['timestamp'],
+        'token': imu_record['token']
+    }
+
+    return transformed_data
