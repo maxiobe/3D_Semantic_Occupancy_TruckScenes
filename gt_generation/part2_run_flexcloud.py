@@ -24,7 +24,7 @@ def main():
     processor = flexcloud_bindings.FlexCloud()
 
     # Call the C++ functions
-    print("Running Keyframe Interpolation...")
+    #print("Running Keyframe Interpolation...")
     processor.run_keyframe_interpolation_from_files(
         config_path=config_path_select_keyframes,
         pos_dir_path=pos_dir,
@@ -40,16 +40,20 @@ def main():
     # This is a placeholder for the logic you need.
     # For now, we assume it processes the same input PCDs.
     ref_path_in = os.path.join(output_dir_keyframes, "poseData.txt")
+    ref_path_in = os.path.join(flexcloud_input_dir, "all_gnss_data_poses.txt")
     slam_path_in = os.path.join(output_dir_keyframes, "kitti_poses.txt")
+    slam_path_in = odom_path
 
-    pcd_path_in = os.path.join(output_dir_keyframes, "000000/cloud.pcd")
+    #pcd_path_in = os.path.join(output_dir_keyframes, "000000/cloud.pcd")
+
+    pcd_path_in =os.path.join(flexcloud_input_dir, "aggregated_cloud.pcd")
     output_pcd_filepath = os.path.join(pcd_dir_transformed, "refined_map.pcd")
 
     processor.run_georeferencing_from_files(
         config_path=config_path_pcd_georef,
-        ref_path=ref_path_in,      # Assuming this is correct
-        slam_path=slam_path_in,   # Assuming this is correct
-        pcd_path=pcd_path_in,       # *** CHECK THIS ***
+        ref_path=ref_path_in,
+        slam_path=slam_path_in,
+        pcd_path=pcd_path_in,
         pcd_out_path=output_pcd_filepath,
     )
     print("Finished running Georeferencing...")

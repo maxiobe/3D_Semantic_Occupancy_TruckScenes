@@ -8,7 +8,7 @@ from tqdm import tqdm
 from truckscenes import TruckScenes
 from scipy.spatial.transform import Rotation
 from collections import defaultdict
-from utils.visualization import visualize_pointcloud, visualize_pointcloud_bbox, visualize_occupancy_o3d
+from utils.visualization import visualize_pointcloud, visualize_pointcloud_bbox, visualize_occupancy_o3d, calculate_and_plot_pose_errors
 from utils.pointcloud_processing import denoise_pointcloud
 from truckscenes.utils.geometry_utils import transform_matrix
 from mmcv.ops.points_in_boxes import (points_in_boxes_cpu)
@@ -19,6 +19,7 @@ from utils.pointcloud_processing import in_range_mask, preprocess_cloud, create_
 from utils.constants import CLASS_COLOR_MAP, STATE_FREE, STATE_UNOBSERVED, STATE_OCCUPIED, DEFAULT_COLOR
 from utils.refinement import assign_label_by_L_shape
 from utils.bbox_utils import is_point_centroid_z_similar, are_box_sizes_similar, get_object_overlap_signature_BATCH, compare_signatures_class_based_OVERLAP_RATIO
+from utils.data_utils import load_kitti_poses
 
 def main(args):
     print("--- Running Part 3: Post-FlexCloud Processing ---")
@@ -50,6 +51,56 @@ def main(args):
     cameras = context['cameras']
     sensor_max_ranges_arr = context['sensor_max_ranges_arr']
     self_range = context['self_range']
+
+    # Load the corrected poses from FlexCloud's output ---
+    flexcloud_output_dir = os.path.join(save_dir_flexcloud, "flexcloud_io", "output_keyframes")
+    kitti_poses_path = os.path.join(flexcloud_output_dir, "kitti_poses.txt")
+
+    print(f"Loading corrected poses from {kitti_poses_path}...")
+    flexcloud_corrected_poses = load_kitti_poses(kitti_poses_path)
+
+    if flexcloud_corrected_poses.shape[0] == 0:
+        print("Could not load corrected poses. Exiting.")
+        sys.exit(1)
+
+    print(f"Successfully loaded {flexcloud_corrected_poses.shape[0]} corrected poses.")
+
+
+    gt_poses = np.array([frame['ego_ref_from_ego_i'] for frame in dict_list])
+    kiss_poses = context['poses_kiss_icp']
+
+    # Comparison 1: KISS-ICP vs Ground Truth
+    if kiss_poses is not None:
+        calculate_and_plot_pose_errors(
+            poses_estimated=kiss_poses,
+            poses_reference=gt_poses,
+            title_prefix="KISS-ICP vs GT",
+            scene_name=scene_name,
+            save_dir=args.save_path,
+            show_plot=args.pose_error_plot
+        )
+
+    # Comparison 2: FlexCloud vs Ground Truth
+    calculate_and_plot_pose_errors(
+        poses_estimated=flexcloud_corrected_poses,
+        poses_reference=gt_poses,
+        title_prefix="FlexCloud vs GT",
+        scene_name=scene_name,
+        save_dir=args.save_path,
+        show_plot=args.pose_error_plot
+    )
+
+    # Comparison 3: FlexCloud vs KISS-ICP (to see the correction amount)
+    if kiss_poses is not None:
+        calculate_and_plot_pose_errors(
+            poses_estimated=flexcloud_corrected_poses,
+            poses_reference=kiss_poses,
+            title_prefix="FlexCloud vs KISS-ICP",
+            scene_name=scene_name,
+            save_dir=args.save_path,
+            show_plot=args.pose_error_plot
+        )
+
 
     # Re-initialize the TruckScenes object
     trucksc = TruckScenes(version=args.version, dataroot=args.dataroot, verbose=False)
@@ -1067,6 +1118,7 @@ if __name__ == '__main__':
                        default='truckscenes.yaml')  # YAML file containing label mappings, default: "truckscenes.yaml"
 
     parse.add_argument('--icp_refinement', action='store_true', help='Enable ICP refinement')
+    parse.add_argument('--pose_error_plot', action='store_true', help='Plot pose error')
 
 
     parse.add_argument('--filter_mode', type=str, default='none', choices=['none', 'sor', 'ror', 'both'],
