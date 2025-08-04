@@ -149,7 +149,7 @@ class InMemoryDatasetMapMOS:
         self.scans = lidar_scans
         self.scan_timestamps_data = [float(t) for t in scan_timestamps]  # Ensure float
         self.labels_data = labels_per_scan  # This is your list of label arrays
-        self.gt_global_poses_data = gt_global_poses
+        self.gt_poses = gt_global_poses
 
         self.sequence_id = sequence_id
         # Add other attributes MapMOSPipeline might expect from a dataset object
