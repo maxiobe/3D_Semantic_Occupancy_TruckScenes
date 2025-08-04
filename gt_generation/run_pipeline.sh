@@ -16,9 +16,11 @@ SAVE_PATH_GT="/home/max/ssd/Masterarbeit/TruckScenes/trainval/v1.0-trainval/gt/a
 DATA_ROOT="/home/max/ssd/Masterarbeit/TruckScenes/trainval/v1.0-trainval"
 VERSION="v1.0-trainval"
 SPLIT="train"
-START=11
-END=12
+START=3
+END=4
 LOAD_MODE="pointwise"
+
+USE_FLEXCLOUD=1
 
 # Define the root directory for your Python scripts
 PIPELINE_DIR="/home/max/Desktop/Masterarbeit/Python/3D_Semantic_Occupancy_TruckScenes/gt_generation"
@@ -59,12 +61,12 @@ do
         --load_mode "$LOAD_MODE" \
         --scene_io_dir "$SCENE_IO_DIR" \
         --icp_refinement \
-        --initial_guess_mode imu \
+        --initial_guess_mode ego_pose \
         --pose_error_plot \
         --filter_lidar_intensity \
         --filter_mode both \
         --filter_static_pc \
-        #--run_mapmos \
+        --run_mapmos \
         #--vis_raw_pc \
         #--vis_static_pc \
         #--vis_static_pc_global \
@@ -78,29 +80,29 @@ do
     #conda deactivate
 
     # --- Step 1b: Create ROS Bag ---
-    echo "--- Preparing to create ROS Bag ---"
+    #echo "--- Preparing to create ROS Bag ---"
     # Note: This step assumes you have sourced your main ROS environment
     # (e.g., /opt/ros/melodic/setup.bash) in your ~/.bashrc or you can
     # uncomment the line below to source it explicitly.
     #source /opt/ros/melodic/setup.bash
 
-    echo "--- Creating ROS Bag inside the liosam-ros1 Docker container ---"
-    docker run --rm \
-        -v "${PIPELINE_DIR}:/scripts" \
-        -v "${SCENE_IO_DIR}:/scene_io" \
-        rosbag-creator \
-        bash -c "source /opt/ros/melodic/setup.bash && python3 /scripts/part1b_create_rosbag.py --scene_io_dir /scene_io"
+    #echo "--- Creating ROS Bag inside the liosam-ros1 Docker container ---"
+    #docker run --rm \
+     #   -v "${PIPELINE_DIR}:/scripts" \
+      #  -v "${SCENE_IO_DIR}:/scene_io" \
+       # rosbag-creator \
+        #bash -c "source /opt/ros/melodic/setup.bash && python3 /scripts/part1b_create_rosbag.py --scene_io_dir /scene_io"
 
 
-    echo "Finished preparing rosbag files"
+    #echo "Finished preparing rosbag files"
 
     # --- Step 1c: Create ROS 2 Bag (NEW STEP) ---
-    echo "--- Creating ROS 2 Bag inside a ROS 2 Docker container ---"
-    docker run --rm \
-        -v "${PIPELINE_DIR}:/scripts" \
-        -v "${SCENE_IO_DIR}:/scene_io" \
-        koide3/glim_ros2:humble \
-        bash -c "source /opt/ros/humble/setup.bash && python3 /scripts/part1b_create_rosbag2.py --scene_io_dir /scene_io"
+    #echo "--- Creating ROS 2 Bag inside a ROS 2 Docker container ---"
+    #docker run --rm \
+     #   -v "${PIPELINE_DIR}:/scripts" \
+      #  -v "${SCENE_IO_DIR}:/scene_io" \
+      #  koide3/glim_ros2:humble \
+      #  bash -c "source /opt/ros/humble/setup.bash && python3 /scripts/part1b_create_rosbag2.py --scene_io_dir /scene_io"
 
     # --- Check for success flag before continuing ---
     FLAG_FILE="${SCENE_IO_DIR}/part1_success.flag"

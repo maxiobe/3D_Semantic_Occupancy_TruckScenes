@@ -401,15 +401,15 @@ def main(trucksc, indice, truckscenesyaml, args, config):
         gpu_time = end_time_gpu - start_time_gpu
         print(f"GPU time for one iteration: {gpu_time:.6f} seconds")"""
 
-        start_time_cpu = time.perf_counter()
+        #start_time_cpu = time.perf_counter()
 
         points_in_boxes = points_in_boxes_cpu(
             points_to_check_tensor,
             boxes_to_check_tensor)  # use function to identify which points belong to which bounding box
 
-        end_time_cpu = time.perf_counter()
-        cpu_time = end_time_cpu - start_time_cpu
-        print(f"CPU time for one iteration: {cpu_time:.6f} seconds")
+        #end_time_cpu = time.perf_counter()
+        #cpu_time = end_time_cpu - start_time_cpu
+        #print(f"CPU time for one iteration: {cpu_time:.6f} seconds")
 
         #################################### Mask for the ego vehicle itself #######################################
         points_xyz = sensor_fused_pc.points.T[:, :3]
@@ -419,7 +419,7 @@ def main(trucksc, indice, truckscenesyaml, args, config):
         inside_y = torch.from_numpy(points_xyz[:, 1] >= y_min_self) & torch.from_numpy(points_xyz[:, 1] <= y_max_self)
         inside_z = torch.from_numpy(points_xyz[:, 2] >= z_min_self) & torch.from_numpy(points_xyz[:, 2] <= z_max_self)
 
-        inside_ego_mask = inside_x & inside_y & inside_z
+        inside_ego_mask = (inside_x & inside_y & inside_z).cpu().numpy()
 
         ############################ Prepare point clouds for kiss-icp #################################
         VELOCITY_THRESHOLD_M_S = 0.2
@@ -434,13 +434,13 @@ def main(trucksc, indice, truckscenesyaml, args, config):
             are_annotated_boxes_moving = box_speeds > VELOCITY_THRESHOLD_M_S
             np.put(is_box_moving_mask, annotated_boxes_indices, are_annotated_boxes_moving)
 
-        points_in_moving_boxes_mask_torch = torch.zeros(sensor_fused_pc.points.shape[1], dtype=torch.bool)
+        points_in_moving_boxes_mask_np = torch.zeros(sensor_fused_pc.points.shape[1], dtype=torch.bool).numpy()
         if np.any(is_box_moving_mask):
-            points_in_moving_boxes_mask_torch = points_in_boxes[0][:, is_box_moving_mask].any(dim=1)
+            points_in_moving_boxes_mask_torch = points_in_boxes[0][:, is_box_moving_mask].any(dim=1).cpu().numpy()
 
-        points_to_remove_mask_torch = inside_ego_mask | points_in_moving_boxes_mask_torch
+        points_to_remove_mask_np = inside_ego_mask | points_in_moving_boxes_mask_np
 
-        initial_keep_for_icp_mask_np = ~points_to_remove_mask_torch.numpy()
+        initial_keep_for_icp_mask_np = ~points_to_remove_mask_np
 
         pc_for_icp = sensor_fused_pc.points.T[initial_keep_for_icp_mask_np]
 
@@ -515,7 +515,7 @@ def main(trucksc, indice, truckscenesyaml, args, config):
         point_box_mask = points_in_boxes[0]  # Remove batch dim: shape (Npoints, Nboxes)
 
         # Point is dynamic if it falls inside *any* box
-        dynamic_mask = point_box_mask.any(dim=-1)  # shape: (Npoints,)
+        dynamic_mask = point_box_mask.any(dim=-1).cpu().numpy()  # shape: (Npoints,)
 
         num_dynamic_points = dynamic_mask.sum().item()
         print(f"Number of dynamic points: {num_dynamic_points}")
@@ -533,57 +533,20 @@ def main(trucksc, indice, truckscenesyaml, args, config):
             torch.from_numpy(gt_bbox_3d_points_in_boxes_cpu_max_enlarged[np.newaxis, :])
         )
 
-        dynamic_mask_max_enlarged = points_in_boxes_max_enlarged[0].any(dim=-1)
+        dynamic_mask_max_enlarged = points_in_boxes_max_enlarged[0].any(dim=-1).cpu().numpy()
 
         only_in_max_enlarged_mask = dynamic_mask_max_enlarged & ~dynamic_mask
         num_points_max_enlarged = only_in_max_enlarged_mask.sum().item()
 
         print(f"Number of points captured only by the max enlarged box: {num_points_max_enlarged}")
 
-        ############################### Combine masks ##############################
-        ego_filter_mask = ~inside_ego_mask
-
-        initial_static_points_mask = static_mask & ego_filter_mask
-        final_static_map_mask = initial_static_points_mask & ~dynamic_mask_max_enlarged
-
-        pc_ego_unfiltered = sensor_fused_pc.points.T[final_static_map_mask]
-        pc_ego_unfiltered_sensors = sensor_ids_points.copy().T[final_static_map_mask]
-        print(
-            f"Number of static points extracted: {pc_ego_unfiltered.shape} with sensor_ids {pc_ego_unfiltered_sensors.shape}")
-
-        pc_with_semantic_ego_unfiltered = pc_with_semantic[final_static_map_mask]
-        pc_with_semantic_ego_unfiltered_sensors = sensor_ids_points.copy().T[final_static_map_mask]
-
-        print(
-            f"Number of semantic static points extracted: {pc_with_semantic_ego_unfiltered.shape} with sensor_ids {pc_with_semantic_ego_unfiltered_sensors.shape}")
-
-        ###################################### Generate labels for mapmos as gt ####################################
-        dynamic_mask_mapmos = dynamic_mask | inside_ego_mask | dynamic_mask_max_enlarged
-
-        current_frame_mapmos_labels = dynamic_mask_mapmos.cpu().numpy().astype(np.int32).reshape(-1, 1)
-        assert current_frame_mapmos_labels.shape[0] == sensor_fused_pc.points.T.shape[0], \
-            "Mismatch between number of points in scan and generated labels"
-
-        total_mapmos_dynamic_labels = dynamic_mask_mapmos.sum().item()
-        print(
-            f"Total points labeled as dynamic for MapMOS input (annotated dynamic + ego): {total_mapmos_dynamic_labels}")
-
-        ############################### Visualize if specified in arguments ###########################################
-        if args.vis_static_pc:
-            visualize_pointcloud_bbox(pc_with_semantic_ego_unfiltered,
-                                      boxes=boxes_ego,
-                                      title=f"Fused static sensor PC + BBoxes + Ego BBox - Frame {i}",
-                                      self_vehicle_range=self_range,
-                                      vis_self_vehicle=True)
-        ############################################################################################################
-
-        pc_ego = pc_ego_unfiltered.copy()
-
+        pc_ego_unfiltered = sensor_fused_pc.points.T
+        pc_ego_unfiltered_sensors = sensor_ids_points.copy().T
         ########################################## Lidar intensity filtering #######################################
         if args.filter_lidar_intensity:
-            print(f'Shape of pc_ego before weather filtering: {pc_ego.shape}')
+            print(f'Shape of pc_ego before weather filtering: {pc_ego_unfiltered_sensors.shape}')
             intensity_keep_mask_ego = get_weather_intensity_filter_mask(
-                point_cloud=pc_ego,
+                point_cloud=pc_ego_unfiltered,
                 weather_condition=weather,
                 intensity_thresh=intensity_threshold,
                 distance_thresh=distance_intensity_threshold,
@@ -592,43 +555,73 @@ def main(trucksc, indice, truckscenesyaml, args, config):
                 ground_z_max=ground_z_max_threshold
             )
 
-            # Apply the mask to both the points and their corresponding sensor IDs
-            pc_ego = pc_ego[intensity_keep_mask_ego]
-            pc_ego_unfiltered_sensors = pc_ego_unfiltered_sensors[intensity_keep_mask_ego]
-            print(f"Shape of pc_ego after weather filtering: {pc_ego.shape}")
-
-            ################################ Visualize if specified in arguments ##################################
+            ################################# Visualize if specified in arguments ##################################
             if args.vis_lidar_intensity_filtered:
-                visualize_pointcloud_bbox(pc_ego,
+                pc_ego_intensity_filtered = pc_ego_unfiltered[intensity_keep_mask_ego]
+                print(f"Shape of pc_ego after weather filtering: {pc_ego_intensity_filtered.shape}")
+                visualize_pointcloud_bbox(pc_ego_intensity_filtered,
                                           boxes=boxes_ego,
-                                          title=f"Fused filtered static sensor PC after lidar intensity filtering + BBoxes + Ego BBox - Frame {i}",
+                                          title=f"Fused filtered sensor PC after lidar intensity filtering + BBoxes + Ego BBox - Frame {i}",
                                           self_vehicle_range=self_range,
                                           vis_self_vehicle=True)
             #######################################################################################################
         else:
             print(f"No lidar intensity filtering according to arguments")
+            intensity_keep_mask_ego = np.ones(sensor_fused_pc.points.shape[1], dtype=bool)
 
+        ###################################### MapMOS inut ################################################
+        mapmos_pc_mask = intensity_keep_mask_ego | dynamic_mask | dynamic_mask_max_enlarged
+        pc_for_mapmos = pc_ego_unfiltered[mapmos_pc_mask]
+        pc_for_mapmos_sensors = pc_ego_unfiltered_sensors[mapmos_pc_mask]
+
+        ###################################### Generate labels for mapmos as gt ####################################
+        dynamic_mask_mapmos = dynamic_mask | inside_ego_mask | dynamic_mask_max_enlarged
+
+        dynamic_labels_for_mapmos = dynamic_mask_mapmos[mapmos_pc_mask]
+
+        labels_for_mapmos = dynamic_labels_for_mapmos.astype(np.int32).reshape(-1, 1)
+        assert pc_for_mapmos.shape[0] == labels_for_mapmos.shape[0], \
+            "Mismatch between the number of points for MapMOS and the number of labels."
+
+        print(f"Created {pc_for_mapmos.shape[0]} points for MapMOS input with {np.sum(labels_for_mapmos)} dynamic labels.")
+
+        ############################### Combine masks #########################################################
+        pre_denoising_static_mask = (
+                ~dynamic_mask &
+                ~inside_ego_mask &
+                ~dynamic_mask_max_enlarged &
+                intensity_keep_mask_ego
+        )
+        pc_for_denoising = pc_ego_unfiltered[pre_denoising_static_mask]
+        sensors_for_denoising = pc_ego_unfiltered_sensors[pre_denoising_static_mask]
+
+        kept_indices = np.arange(pc_for_denoising.shape[0])  # Default is to keep all
         ############################# Apply filtering to static points in ego frame #################################
         if args.filter_static_pc and args.filter_mode != 'none':
-            print(f"Applying geometric filter ('{args.filter_mode}') to the aggregated static map...")
+            print(f"Applying geometric filter ('{args.filter_mode}') to {pc_for_denoising.shape[0]} static candidates...")
             pcd_static = o3d.geometry.PointCloud()
-            pcd_static.points = o3d.utility.Vector3dVector(pc_ego[:, :3])
-            """filtered_pcd_static, kept_indices = denoise_pointcloud(
-                pcd_static, args.filter_mode, config, location_msg=f"static ego points at frame {i}"
-            )"""
-            filtered_pcd_static, kept_indices = denoise_pointcloud_advanced(
+            pcd_static.points = o3d.utility.Vector3dVector(pc_for_denoising[:, :3])
+
+            _, kept_indices = denoise_pointcloud_advanced(
                 pcd=pcd_static,
                 filter_mode=args.filter_mode,
                 config=config,
-                location_msg="aggregated static points"
+                location_msg="final static points"
             )
 
-            pc_ego = np.asarray(filtered_pcd_static.points)
-            pc_ego_unfiltered_sensors = pc_ego_unfiltered_sensors[kept_indices]
+        final_static_pc = pc_for_denoising[kept_indices]
+        final_static_pc_sensors = sensors_for_denoising[kept_indices]
+        print(f"Final static map has {final_static_pc.shape[0]} points after all filters.")
 
-        assert pc_ego.shape[0] == pc_ego_unfiltered_sensors.shape[0], (
-            f"static points ({pc_ego.shape[0]}) != sensor_ids ({pc_ego_unfiltered_sensors.shape[0]})"
-        )
+        final_static_points_keep_mask = np.zeros(sensor_fused_pc.points.shape[1], dtype=bool)
+        absolute_indices_into_denoiser = np.where(pre_denoising_static_mask)[0]
+        absolute_indices_kept = absolute_indices_into_denoiser[kept_indices]
+        final_static_points_keep_mask[absolute_indices_kept] = True
+
+        final_static_map_mask = final_static_points_keep_mask[mapmos_pc_mask]
+
+        assert final_static_map_mask.shape[0] == pc_for_mapmos.shape[0], \
+            f"Shape mismatch! `pc_for_mapmos` has {pc_for_mapmos.shape[0]} points, but `final_static_map_mask` has {final_static_map_mask.shape[0]}."
 
         ############################ Visualization #############################################################
         if args.vis_static_pc and args.filter_static_pc:
@@ -656,16 +649,16 @@ def main(trucksc, indice, truckscenesyaml, args, config):
             ego_ref_from_ego_i = ref_ego_from_global @ global_from_ego_i
             print(f"Frame {i}: Calculated transform to reference frame.")
 
-        points_in_ref_frame = transform_points(pc_ego, ego_ref_from_ego_i)
+        points_in_ref_frame = transform_points(final_static_pc, ego_ref_from_ego_i)
         print(f"Frame {i}: Transformed static points to ref ego. Shape: {points_in_ref_frame.shape}")
 
-        points_in_global_frame = transform_points(pc_ego, global_from_ego_i)
+        points_in_global_frame = transform_points(final_static_pc, global_from_ego_i)
         print(f"Frame {i}: Transformed static points to global. Shape: {points_in_global_frame.shape}")
 
         if args.vis_static_pc_global:
             visualize_pointcloud(points_in_ref_frame, title=f"Fused sensor PC in world coordinates - Frame {i}")
 
-        pc_ego_i_save = pc_ego.copy()
+        pc_ego_i_save = final_static_pc.copy()
         print(f"Frame {i}: Static points in ego frame shape: {pc_ego_i_save.shape}")
         pc_ego_ref_save = points_in_ref_frame.copy()
         pc_global_save = points_in_global_frame.copy()
@@ -701,7 +694,10 @@ def main(trucksc, indice, truckscenesyaml, args, config):
             "object_points_list_sensor_ids": objects_points_list_sensor_ids,
             "raw_lidar_ego": sensor_fused_pc.points.T,
             "raw_lidar_ego_sensor_ids": sensor_ids_points.T,
-            "mapmos_per_point_labels": current_frame_mapmos_labels,
+            "mapmos_per_point_labels": labels_for_mapmos,
+            "mapmos_pc": pc_for_mapmos,
+            "mapmos_pc_sensors": pc_for_mapmos_sensors,
+            "final_static_mask": final_static_map_mask,
             "lidar_pc_ego_i": pc_ego_i_save,
             "lidar_pc_ego_sensor_ids": pc_ego_unfiltered_sensors,
             "lidar_pc_ego_ref": pc_ego_ref_save,
@@ -800,6 +796,88 @@ def main(trucksc, indice, truckscenesyaml, args, config):
         gt_relative_poses_arr = np.array(gt_relative_poses_list)  # Shape: (num_frames, 4, 4)
         print(f"Collected {gt_relative_poses_arr.shape[0]} GT relative poses for comparison.")
 
+
+    ###############################################################################################
+    ######################## Calculate initial guesses ###########################################
+    initial_relative_motions = []
+
+    if args.initial_guess_mode == 'ego_pose':
+        print("Using 'ego_pose' for initial guesses.")
+
+        if not dict_list:
+            print("Warning: dict_list is empty. Cannot generate 'ego_pose' initial guesses.")
+        else:
+            initial_relative_motions.append(np.eye(4))
+            print(f"  Frame 0 (batch index 0): Initial guess is Identity (ego_pose mode anchor).")
+
+            for k_dict_idx in range(1, len(dict_list)):  # k_dict_idx is the index in dict_list
+                # Global pose of previous frame (k-1) from dataset
+                ego_pose_prev_dict = dict_list[k_dict_idx - 1]['ego_pose']
+                P_dataset_prev_global = transform_matrix(
+                    ego_pose_prev_dict['translation'],
+                    Quaternion(ego_pose_prev_dict['rotation']),
+                    inverse=False
+                )
+
+                # Global pose of current frame (k) from dataset
+                ego_pose_curr_dict = dict_list[k_dict_idx]['ego_pose']
+                P_dataset_curr_global = transform_matrix(
+                    ego_pose_curr_dict['translation'],
+                    Quaternion(ego_pose_curr_dict['rotation']),
+                    inverse=False
+                )
+
+                try:
+                    P_dataset_prev_global_inv = np.linalg.inv(P_dataset_prev_global)
+                    relative_motion_from_dataset = P_dataset_prev_global_inv @ P_dataset_curr_global
+                    initial_relative_motions.append(relative_motion_from_dataset)
+                except np.linalg.LinAlgError:
+                    print(
+                        f"  Warning: Singular matrix for ego_pose at dict_list index {k_dict_idx - 1}. Appending Identity for relative motion.")
+                    initial_relative_motions.append(np.eye(4))
+
+        print(f"  Generated {len(initial_relative_motions)} initial guesses from 'ego_pose'.")
+
+    elif args.initial_guess_mode == 'imu':
+        print("Using 'IMU' for initial guesses.")
+
+        if not dict_list:
+            print("Warning: dict_list is empty. Cannot generate 'IMU' initial guesses.")
+        else:
+            initial_relative_motions.append(np.eye(4))
+            print(f"  Frame 0 (batch index 0): Initial guess is Identity (IMU mode anchor).")
+
+            # For subsequent frames k > 0
+            for k in range(1, len(dict_list)):
+                frame_data_prev = dict_list[k - 1]
+                frame_data_curr = dict_list[k]
+
+                imu_data_prev = frame_data_prev.get(
+                    'ego_motion_chassis')
+                imu_data_curr = frame_data_curr.get('ego_motion_chassis')
+                ts_prev = frame_data_prev['sample_timestamp']
+                ts_curr = frame_data_curr['sample_timestamp']
+
+                if imu_data_prev and imu_data_curr:
+                    dt_sec = (ts_curr - ts_prev) / 1e6
+                    if dt_sec > 1e-6:  # Check for valid positive time difference
+                        relative_motion_imu = integrate_imu_for_relative_motion(imu_data_prev, imu_data_curr,
+                                                                                dt_sec)
+                        initial_relative_motions.append(relative_motion_imu)
+                    else:
+                        print(f"  Warning: dt_sec is {dt_sec} for frame {k}. Appending Identity for IMU guess.")
+                        initial_relative_motions.append(np.eye(4))
+                else:
+                    print(
+                        f"  Warning: Missing IMU data for frame index {k - 1} or {k} in dict_list. Appending Identity.")
+                    initial_relative_motions.append(np.eye(4))  # Fallback
+
+                print(f"  Generated {len(initial_relative_motions)} initial guesses from 'IMU'.")
+    else:
+        print("Initial guess mode is 'none' or invalid. KISS-ICP will use its default constant velocity model.")
+        pass
+
+
     ##############################################################################################
     ##################################### MapMOS #################################################
 
@@ -818,12 +896,16 @@ def main(trucksc, indice, truckscenesyaml, args, config):
         log_dir_mapmos = osp.join(save_path, scene_name, "mapmos_logs")
 
         mapmos_labels_per_scan = [frame_dict['mapmos_per_point_labels'] for frame_dict in dict_list]
+        final_static_keep_mask = [frame_dict['final_static_mask'] for frame_dict in dict_list]
+
+        mapmos_pc_list = [frame_dict['mapmos_pc'] for frame_dict in dict_list]
+        mapmos_pc_sensor_list = [frame_dict['mapmos_pc_sensors'] for frame_dict in dict_list]
 
         try:
             print("Initializing InMemoryDatasetMapMOS...")
 
             in_memory_dataset_mapmos = InMemoryDatasetMapMOS(
-                lidar_scans=raw_pc_list,
+                lidar_scans=mapmos_pc_list,
                 scan_timestamps=lidar_timestamps,
                 labels_per_scan=mapmos_labels_per_scan,
                 gt_global_poses=gt_relative_poses_arr,  # Optional
@@ -846,10 +928,11 @@ def main(trucksc, indice, truckscenesyaml, args, config):
                     weights=weights_path_mapmos,
                     config=config_path_mapmos,
                     visualize=False,
-                    save_ply=True,
+                    save_ply=args.save_mapmos_pc,
                     save_kitti=False,
                     n_scans=-1,
-                    jump=0
+                    jump=0,
+                    initial_guesses_relative=initial_relative_motions
                 )
 
                 print("MapMOS pipeline initialized.")
@@ -899,11 +982,11 @@ def main(trucksc, indice, truckscenesyaml, args, config):
         if all_frame_predictions:
             print(f"\n--- Filtering static points for all {len(all_frame_predictions)} frames ---")
             for frame_idx, frame_data in enumerate(all_frame_predictions):
-                original_points_in_frame = raw_pc_list[frame_idx]
-                original_points_in_frame_sensor_ids = raw_pc_list_sensor_ids[frame_idx]
+                original_points_in_frame = mapmos_pc_list[frame_idx]
+                original_points_in_frame_sensor_ids = mapmos_pc_sensor_list[frame_idx]
 
                 # Condition 1: Point was considered STATIC in your input GT to MapMOS
-                input_gt_is_static_mask = (mapmos_labels_per_scan[frame_idx].flatten() == 0)
+                input_gt_is_static_mask = final_static_keep_mask[frame_idx]
                 # Condition 2: Point was NOT predicted as DYNAMIC by MapMOS
                 mapmos_predicted_labels = frame_data["predicted_labels"]
                 mapmos_not_predicted_dynamic_mask = (
@@ -923,34 +1006,7 @@ def main(trucksc, indice, truckscenesyaml, args, config):
             print(
                 f"Static points list mapmos: {len(static_points_refined)} frames with sensor ids: {len(static_points_refined_sensor_ids)}")
 
-        """raw_pc_0 = raw_pc_list[0]
-
-        # Condition 1: Point is NOT dynamic in your GT input to MapMOS
-        input_gt_is_static_mask = (mapmos_labels_per_scan[0].flatten() == 0)
-
-        # Condition 2: Point is NOT classified as dynamic by MapMOS prediction
-        mapmos_predicted_labels = all_frame_predictions[0]["predicted_labels"]
-        mapmos_not_predicted_dynamic_mask = (
-                    mapmos_predicted_labels != 1)  # True if MapMOS predicted 0 (static) or -1 (unclassified)
-
-        # Combine both conditions: A point is truly static if both are true
-        final_static_mask = input_gt_is_static_mask & mapmos_not_predicted_dynamic_mask
-
-        # Filter raw_pc_0 using this final static mask
-        static_points_from_raw_pc_0 = raw_pc_0[final_static_mask]
-
-        print(f"--- Filtering for Frame 0 ---")
-        print(f"Original number of points in raw_pc_0: {raw_pc_0.shape[0]}")
-        print(f"Number of points static according to your input GT: {np.sum(input_gt_is_static_mask)}")
-        print(f"Number of points NOT predicted as dynamic by MapMOS: {np.sum(mapmos_not_predicted_dynamic_mask)}")
-        print(f"Number of points satisfying BOTH static conditions: {static_points_from_raw_pc_0.shape[0]}")
-
-
-        pcd_static_vis = o3d.geometry.PointCloud()
-        pcd_static_vis.points = o3d.utility.Vector3dVector(static_points_from_raw_pc_0[:, :3])
-        pcd_static_vis.paint_uniform_color([0.0, 0.0, 1.0])  # Blue for these static points
-        o3d.visualization.draw_geometries([pcd_static_vis],
-                                          window_name=f"Final Static Points (Frame 0)")"""
+        visualize_pointcloud(static_points_refined[0])
 
     else:
         print("Proceeding without running MapMOS pipeline.")
@@ -969,84 +1025,6 @@ def main(trucksc, indice, truckscenesyaml, args, config):
         pipeline = None
         estimated_poses_kiss = None
         log_dir_kiss = osp.join(save_path, scene_name, "kiss_icp_logs")
-
-        initial_relative_motions = []
-
-        if args.initial_guess_mode == 'ego_pose':
-            print("Using 'ego_pose' for initial guesses.")
-
-            if not dict_list:
-                print("Warning: dict_list is empty. Cannot generate 'ego_pose' initial guesses.")
-            else:
-                initial_relative_motions.append(np.eye(4))
-                print(f"  Frame 0 (batch index 0): Initial guess is Identity (ego_pose mode anchor).")
-
-                for k_dict_idx in range(1, len(dict_list)):  # k_dict_idx is the index in dict_list
-                    # Global pose of previous frame (k-1) from dataset
-                    ego_pose_prev_dict = dict_list[k_dict_idx - 1]['ego_pose']
-                    P_dataset_prev_global = transform_matrix(
-                        ego_pose_prev_dict['translation'],
-                        Quaternion(ego_pose_prev_dict['rotation']),
-                        inverse=False
-                    )
-
-                    # Global pose of current frame (k) from dataset
-                    ego_pose_curr_dict = dict_list[k_dict_idx]['ego_pose']
-                    P_dataset_curr_global = transform_matrix(
-                        ego_pose_curr_dict['translation'],
-                        Quaternion(ego_pose_curr_dict['rotation']),
-                        inverse=False
-                    )
-
-                    try:
-                        P_dataset_prev_global_inv = np.linalg.inv(P_dataset_prev_global)
-                        relative_motion_from_dataset = P_dataset_prev_global_inv @ P_dataset_curr_global
-                        initial_relative_motions.append(relative_motion_from_dataset)
-                    except np.linalg.LinAlgError:
-                        print(
-                            f"  Warning: Singular matrix for ego_pose at dict_list index {k_dict_idx - 1}. Appending Identity for relative motion.")
-                        initial_relative_motions.append(np.eye(4))
-
-            print(f"  Generated {len(initial_relative_motions)} initial guesses from 'ego_pose'.")
-
-        elif args.initial_guess_mode == 'imu':
-            print("Using 'IMU' for initial guesses.")
-
-            if not dict_list:
-                print("Warning: dict_list is empty. Cannot generate 'IMU' initial guesses.")
-            else:
-                initial_relative_motions.append(np.eye(4))
-                print(f"  Frame 0 (batch index 0): Initial guess is Identity (IMU mode anchor).")
-
-                # For subsequent frames k > 0
-                for k in range(1, len(dict_list)):
-                    frame_data_prev = dict_list[k - 1]
-                    frame_data_curr = dict_list[k]
-
-                    imu_data_prev = frame_data_prev.get(
-                        'ego_motion_chassis')
-                    imu_data_curr = frame_data_curr.get('ego_motion_chassis')
-                    ts_prev = frame_data_prev['sample_timestamp']
-                    ts_curr = frame_data_curr['sample_timestamp']
-
-                    if imu_data_prev and imu_data_curr:
-                        dt_sec = (ts_curr - ts_prev) / 1e6
-                        if dt_sec > 1e-6:  # Check for valid positive time difference
-                            relative_motion_imu = integrate_imu_for_relative_motion(imu_data_prev, imu_data_curr,
-                                                                                    dt_sec)
-                            initial_relative_motions.append(relative_motion_imu)
-                        else:
-                            print(f"  Warning: dt_sec is {dt_sec} for frame {k}. Appending Identity for IMU guess.")
-                            initial_relative_motions.append(np.eye(4))
-                    else:
-                        print(
-                            f"  Warning: Missing IMU data for frame index {k - 1} or {k} in dict_list. Appending Identity.")
-                        initial_relative_motions.append(np.eye(4))  # Fallback
-
-                    print(f"  Generated {len(initial_relative_motions)} initial guesses from 'IMU'.")
-        else:
-            print("Initial guess mode is 'none' or invalid. KISS-ICP will use its default constant velocity model.")
-            pass
 
         try:
             icp_input_pc_list = [frame_dict['lidar_pc_for_icp_ego_i'] for frame_dict in dict_list]
@@ -1480,11 +1458,6 @@ if __name__ == '__main__':
 
     parse.add_argument('--load_mode', type=str, default='pointwise')  # pointwise or rigid
 
-    #parse.add_argument('--static_map_keyframes_only', action='store_true',
-              #         help='Build the final static map using only keyframes (after ICP, if enabled, ran on all frames).')
-    #parse.add_argument('--dynamic_map_keyframes_only', action='store_true',
-                      # help='Aggregate dynamic object points using only segments from keyframes..')
-
     ####################### Kiss-ICP refinement ##########################################
     parse.add_argument('--icp_refinement', action='store_true', help='Enable ICP refinement')
     parse.add_argument('--initial_guess_mode', type=str, default='none', choices=['none', 'ego_pose', 'imu'])
@@ -1492,6 +1465,7 @@ if __name__ == '__main__':
 
     ####################### MapMOS ########################################################
     parse.add_argument('--run_mapmos', action='store_true', help='Enable the MapMOS pipeline to refine the static map.')
+    parse.add_argument('--save_mapmos_pc', action='store_true', help='Save labeled point clouds from MapMOS.')
 
     ######################## Filtering ####################################################
     parse.add_argument('--filter_mode', type=str, default='none', choices=['none', 'sor', 'ror', 'both'],
@@ -1501,10 +1475,6 @@ if __name__ == '__main__':
 
     parse.add_argument('--filter_raw_pc', action='store_true', help='Enable raw pc filtering')
     parse.add_argument('--filter_static_pc', action='store_true', help='Enable static pc filtering')
-    #parse.add_argument('--filter_aggregated_static_pc', action='store_true',
-     #                  help='Enable aggregated static pc filtering')
-    #parse.add_argument('--filter_combined_static_dynamic_pc', action='store_true',
-     #                  help='Enable combined static and dynamic pc filtering')
 
     ########################## Visualization ################################################
     parse.add_argument('--vis_raw_pc', action='store_true', help='Enable raw pc visualization')
@@ -1521,10 +1491,6 @@ if __name__ == '__main__':
                        help='Enable aggregated static global pc visualization')
     parse.add_argument('--vis_aggregated_raw_pc_ego_i', action='store_true',
                        help='Enable aggregated raw pc ego i visualization')
-    #parse.add_argument('--vis_static_frame_comparison_kiss_refined', action='store_true',
-     #                  help='Enable static frame comparison kiss refinement')
-    #parse.add_argument('--vis_aggregated_static_kiss_refined', action='store_true',
-     #                  help='Enable aggregated static kiss refinement')
 
 
     args = parse.parse_args()
