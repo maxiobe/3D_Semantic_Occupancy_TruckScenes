@@ -12,18 +12,21 @@ class GaussianHead(BaseTaskHead):
         self, 
         init_cfg=None,
         apply_loss_type=None,
-        num_classes=18,
+        num_classes=17,
         empty_args=None,
         with_empty=False,
         cuda_kwargs=None,
         dataset_type='nusc',
-        empty_label=17,
+        empty_label=16,
         use_localaggprob=False,
         use_localaggprob_fast=False,
         combine_geosem=False,
         **kwargs,
     ):
         super().__init__(init_cfg)
+
+        print("--- DEBUGGING GAUSSIAN HEAD ---")
+        print("cuda_kwargs received by head:", cuda_kwargs)
         
         self.num_classes = num_classes
         self.use_localaggprob = use_localaggprob

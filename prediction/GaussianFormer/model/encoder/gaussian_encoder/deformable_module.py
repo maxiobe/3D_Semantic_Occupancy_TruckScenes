@@ -97,7 +97,7 @@ class DeformableFeatureAggregation(BaseModule):
         embed_dims: int = 256,
         num_groups: int = 8,
         num_levels: int = 4,
-        num_cams: int = 6,
+        num_cams: int = 4,
         proj_drop: float = 0.0,
         attn_drop: float = 0.0,
         kps_generator: dict = None,

@@ -64,17 +64,20 @@ loss_input_convertion = dict(
 )
 # ========= model config ===============
 embed_dims = 128
-num_decoder = 3#4
+num_decoder = 2#4
 num_single_frame_decoder = 1
 #pc_range = [-50.0, -50.0, -5.0, 50.0, 50.0, 3.0]
 pc_range = [-40, -40, -1, 40, 40, 5.4]
+grid_size=0.4
+voxel_shape = [200, 200, 16]
+
 scale_range = [0.08, 0.64]
 xyz_coordinate = 'cartesian'
 phi_activation = 'sigmoid'
 include_opa = True
 load_from = 'ckpts/r101_dcn_fcos3d_pretrain.pth'
 semantics = True
-semantic_dim = 17
+semantic_dim = 16
 
 model = dict(
     img_backbone_out_indices=[0, 1, 2, 3],
@@ -122,6 +125,7 @@ model = dict(
         ),
         deformable_model=dict(
             embed_dims=embed_dims,
+            num_cams=4,
             kps_generator=dict(
                 embed_dims=embed_dims,
                 phi_activation=phi_activation,
@@ -152,7 +156,7 @@ model = dict(
             in_channels=embed_dims,
             embed_channels=embed_dims,
             pc_range=pc_range,
-            grid_size=[0.5, 0.5, 0.5],
+            grid_size=[grid_size, grid_size, grid_size],
             phi_activation=phi_activation,
             xyz_coordinate=xyz_coordinate,
             use_out_proj=True,
@@ -177,6 +181,7 @@ model = dict(
         type='GaussianHead',
         apply_loss_type='random_1',
         num_classes=semantic_dim + 1,
+        empty_label=16,
         empty_args=dict(
             _delete_=True,
             mean=[0, 0, -1.0],
@@ -186,8 +191,8 @@ model = dict(
         cuda_kwargs=dict(
             _delete_=True,
             scale_multiplier=3,
-            H=200, W=200, D=16,
-            pc_min=[-50.0, -50.0, -5.0],
-            grid_size=0.5),
+            H=voxel_shape[0], W=voxel_shape[1], D=voxel_shape[2],
+            pc_min=pc_range[:3],
+            grid_size=grid_size,),
     )
 )

@@ -481,7 +481,7 @@ class LoadOccupancySurroundOcc(object):
         self.use_sweeps = use_sweeps
         self.perturb = perturb
 
-        xyz = self.get_meshgrid([-50, -50, -5.0, 50, 50, 3.0], [200, 200, 16], 0.5)
+        xyz = self.get_meshgrid([-40, -40, -1.0, 40, 40, 5.4], [200, 200, 16], 0.4)
         self.xyz = np.concatenate([xyz, np.ones_like(xyz[..., :1])], axis=-1) # x, y, z, 4
 
     def get_meshgrid(self, ranges, grid, reso):
@@ -499,9 +499,9 @@ class LoadOccupancySurroundOcc(object):
         return xyz # x, y, z, 3
 
     def __call__(self, results):
-        scene_folder_name = results['scene_token'] # Added maxiobe
         #label_file = os.path.join(self.occ_path, results['pts_filename'].split('/')[-1]+'.npy')
-        label_file = os.path.join(self.occ_path, scene_folder_name, 'labels.npz')
+        #label_file = os.path.join(self.occ_path, scene_folder_name, sample_token, 'labels.npz')
+        label_file = results['occ_path']
 
         if os.path.exists(label_file):
             npz_data = np.load(label_file) # Added maxiobe
