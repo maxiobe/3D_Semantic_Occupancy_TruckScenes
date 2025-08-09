@@ -17,7 +17,7 @@ from pyquaternion import Quaternion
 from utils.occupancy_utils import calculate_camera_visibility_gpu_host, calculate_lidar_visibility_gpu_host, calculate_camera_visibility_cpu, calculate_lidar_visibility
 from utils.pointcloud_processing import in_range_mask, preprocess_cloud, create_mesh_from_map, preprocess
 from utils.constants import CLASS_COLOR_MAP, STATE_FREE, STATE_UNOBSERVED, STATE_OCCUPIED, DEFAULT_COLOR
-from utils.refinement import assign_label_by_L_shape, assign_label_by_L_shape_optimized
+from utils.refinement import assign_label_by_L_shape, assign_label_by_dual_obb_check
 from utils.bbox_utils import is_point_centroid_z_similar, are_box_sizes_similar, get_object_overlap_signature_BATCH, compare_signatures_class_based_OVERLAP_RATIO
 from utils.data_utils import load_kitti_poses
 
@@ -59,7 +59,7 @@ def main(args):
     lidar_pc_final_global_sensor_ids=context['lidar_pc_final_global_sensor_ids']
 
 
-    # Load the corrected poses from FlexCloud's output ---
+    """"# Load the corrected poses from FlexCloud's output ---
     flexcloud_output_dir = os.path.join(save_dir_flexcloud, "flexcloud_io/pcd_transformed")
     flexcloud_xyz_poses_path = os.path.join(flexcloud_output_dir, "traj_matching/target_rs.txt")
 
@@ -130,7 +130,7 @@ def main(args):
             scene_name=scene_name,
             save_dir=args.save_path,
             show_plot=args.pose_error_plot
-        )
+        )"""
 
 
     # Re-initialize the TruckScenes object
@@ -173,7 +173,7 @@ def main(args):
         }
     }
 
-    point_cloud_flexcloud_path = os.path.join(flexcloud_output_dir, "refined_map.pcd")
+    """point_cloud_flexcloud_path = os.path.join(flexcloud_output_dir, "refined_map.pcd")
     point_cloud_flexcloud = o3d.io.read_point_cloud(point_cloud_flexcloud_path)
     point_cloud_flexcloud_np = np.array(point_cloud_flexcloud.points)
 
@@ -201,7 +201,7 @@ def main(args):
 
     unrefined_pc = np.concatenate(unrefined_pc_ego_ref_list, axis=0)
 
-    visualize_pointcloud(unrefined_pc)
+    visualize_pointcloud(unrefined_pc)"""
 
 
 
@@ -506,20 +506,30 @@ def main(args):
         overlap_idxs = np.where(point_counts > 1)[0]
 
         if len(overlap_idxs) > 0:
+            print(f"Found {len(overlap_idxs)} points in overlapping bounding boxes.")
+
+            pt_to_box_map = defaultdict(list)
+            for pi in overlap_idxs:
+                box_indices = np.where(points_in_boxes[0][pi, :].bool())[0]
+                pt_to_box_map[pi] = box_indices.tolist()
+
+            truly_ambiguous_idxs = []
+            for pi in overlap_idxs:
+                overlapping_box_indices = pt_to_box_map.get(pi, [])
+                unique_classes = set(box_categories[b_idx] for b_idx in overlapping_box_indices)
+                if len(unique_classes) > 1:
+                    truly_ambiguous_idxs.append(pi)
+
+            print(f"Found {len(truly_ambiguous_idxs)} points with true inter-class ambiguity to resolve.")
+
             if args.vis_dyn_ambigious_points:
                 viz_cloud_ambiguous = dyn_points_semantic.copy()
-                viz_cloud_ambiguous[overlap_idxs, 3] = 20
+                viz_cloud_ambiguous[truly_ambiguous_idxs, 3] = 20
                 visualize_pointcloud_bbox(viz_cloud_ambiguous,
                                           boxes=boxes,
                                           title=f"All Ambiguous Points Highlighted - Frame {i}",
                                           self_vehicle_range=self_range,
                                           vis_self_vehicle=True)
-
-            print(f"Found {len(overlap_idxs)} ambiguous points in the final aggregated cloud.")
-            pt_to_box_map = defaultdict(list)
-            for pi in overlap_idxs:
-                box_indices = np.where(points_in_boxes[0][pi, :].bool())[0]
-                pt_to_box_map[pi] = box_indices.tolist()
 
             # Prepare the boxes with labels for the function
             boxes_with_labels = np.concatenate([boxes_for_lshape_logic, box_categories.reshape(-1, 1)], axis=1)
@@ -527,7 +537,7 @@ def main(args):
             labels_before_refinement = dyn_points_semantic[:, 3:4]
 
             # --- Step 3: Call the refinement function on the dynamic subset ---
-            final_dyn_labels, reassigned_indices = assign_label_by_L_shape(
+            """final_dyn_labels, reassigned_indices = assign_label_by_L_shape(
                 overlap_idxs=overlap_idxs,
                 pt_to_box_map=pt_to_box_map,
                 points=dyn_points,  # Pass only the dynamic points
@@ -541,10 +551,10 @@ def main(args):
                 ID_TRUCK=TRUCK_ID,
                 ID_FORKLIFT=OTHER_VEHICLE_ID,
                 high_overlap_threshold=0.85,
-            )
+            )"""
 
-            """final_dyn_labels, reassigned_indices = assign_label_by_L_shape_optimized(
-                overlap_idxs=truly_ambiguous_idxs,  # Pass only points with true inter-class ambiguity
+            final_dyn_labels, reassigned_indices = assign_label_by_dual_obb_check(
+                overlap_idxs=np.array(truly_ambiguous_idxs),
                 pt_to_box_map=pt_to_box_map,
                 points=dyn_points,
                 boxes=boxes_for_lshape_logic,
@@ -554,7 +564,7 @@ def main(args):
                 ID_TRUCK=TRUCK_ID,
                 ID_FORKLIFT=OTHER_VEHICLE_ID,
                 device=device
-            )"""
+            )
 
             # --- Step 4: Update the labels within our semantic dynamic points array ---
             dyn_points_semantic[:, 3] = final_dyn_labels.flatten()

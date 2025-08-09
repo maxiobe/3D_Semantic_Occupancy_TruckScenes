@@ -7,7 +7,12 @@ from .bbox_utils import calculate_3d_overlap_ratio_pytorch3d, calculate_3d_iou_p
 import math
 from tqdm import tqdm
 from pyquaternion import Quaternion
-from truckscenes.utils.geometry_utils import transform_matrix, points_in_box
+from truckscenes.utils.geometry_utils import transform_matrix
+from truckscenes.utils.data_classes import Box
+from collections import defaultdict
+from mmcv.ops.points_in_boxes import (points_in_boxes_cpu, points_in_boxes_all)
+from .visualization import visualize_pointcloud, visualize_pointcloud_bbox
+
 
 def resolve_overlap_by_distance(
         ambiguous_points_xyz: np.ndarray,
@@ -312,3 +317,222 @@ def assign_label_by_L_shape(
     print(f"Assigned {changed_ids} overlap points")
 
     return new_labels.reshape(-1, 1), reassigned_point_indices
+
+
+def quaternion_to_matrix_pytorch(quaternions: torch.Tensor) -> torch.Tensor:
+    """
+    Converts a batch of quaternions to a batch of rotation matrices.
+    Args:
+        quaternions: (..., 4), tensor of quaternions in (w, x, y, z) format.
+    Returns:
+        (..., 3, 3), batch of rotation matrices.
+    """
+    w, x, y, z = torch.unbind(quaternions, -1)
+    tx = 2.0 * x
+    ty = 2.0 * y
+    tz = 2.0 * z
+    twx = tx * w
+    twy = ty * w
+    twz = tz * w
+    txx = tx * x
+    txy = ty * x
+    txz = tz * x
+    tyy = ty * y
+    tyz = tz * y
+    tzz = tz * z
+
+    mat = torch.stack([
+        1.0 - (tyy + tzz), txy - twz, txz + twy,
+        txy + twz, 1.0 - (txx + tzz), tyz - twx,
+        txz - twy, tyz + twx, 1.0 - (txx + tyy)
+    ], dim=-1).view(-1, 3, 3)
+
+    # If the input had batch dimensions, reshape to match
+    if quaternions.dim() > 1:
+        mat = mat.view(*quaternions.shape[:-1], 3, 3)
+
+    return mat
+
+
+# UPDATED: Helper to create a (w, x, y, z) quaternion from yaw.
+def torch_quat_from_yaw(yaw: torch.Tensor) -> torch.Tensor:
+    """Creates a quaternion from a yaw angle tensor on the same device."""
+    half_yaw = yaw / 2.0
+    cos_half_yaw = torch.cos(half_yaw)
+    sin_half_yaw = torch.sin(half_yaw)
+    zero = torch.zeros_like(yaw)
+    # Format: (w, x, y, z)
+    return torch.stack([cos_half_yaw, zero, zero, sin_half_yaw], dim=-1)
+
+
+# UPDATED: Helper to build the 4x4 transform matrix using our new function.
+def transform_matrix_pytorch(translation: torch.Tensor, quaternion: torch.Tensor) -> torch.Tensor:
+    """Creates a 4x4 transformation matrix on the GPU from translation and quaternion."""
+    device = translation.device
+    T = torch.eye(4, device=device)
+    T[:3, :3] = quaternion_to_matrix_pytorch(quaternion)
+    T[:3, 3] = translation
+    return T
+
+
+def assign_label_by_dual_obb_check(
+        overlap_idxs: np.ndarray,
+        pt_to_box_map: Dict[int, List[int]],
+        points: np.ndarray,
+        boxes: np.ndarray,
+        box_cls_labels: np.ndarray,
+        pt_labels: np.ndarray,
+        ID_TRAILER: int,
+        ID_TRUCK: int,
+        ID_FORKLIFT: int,
+        device: torch.device,
+        hitch_height: float = 1.25,
+) -> Tuple[np.ndarray, List[int]]:
+    """
+    Resolves overlaps by running points_in_boxes twice.
+    This version correctly calculates the BOTTOM CENTER for each box,
+    as required by the mmcv function.
+    """
+    print("--- Running Refinement (Corrected Dual OBB Check w/ Bottom Centers) ---")
+    original_labels_gpu = torch.from_numpy(pt_labels.flatten()).long().to(device)
+    new_labels_gpu = original_labels_gpu.clone()
+    points_gpu = torch.from_numpy(points).float().to(device)
+    boxes[:, 3] *= 1.10
+    boxes_gpu = torch.from_numpy(boxes).float().to(device)
+
+    groups = defaultdict(list)
+    for pi in overlap_idxs:
+        box_indices = tuple(sorted(pt_to_box_map.get(pi, [])))
+        if len(box_indices) > 1:
+            groups[box_indices].append(pi)
+
+    print(f"Found {len(groups)} unique overlap groups to process.")
+
+    for box_indices_tuple, point_indices in tqdm(groups.items(), desc="Processing overlap groups"):
+
+        overlapping_classes = {box_cls_labels[b_idx] for b_idx in box_indices_tuple}
+        if ID_TRUCK not in overlapping_classes:
+            continue
+
+        point_indices_gpu = torch.tensor(point_indices, device=device, dtype=torch.long)
+        points_to_process_gpu = points_gpu[point_indices_gpu]
+
+        try:
+            truck_g_idx = next(b_idx for b_idx in box_indices_tuple if box_cls_labels[b_idx] == ID_TRUCK)
+        except StopIteration:
+            continue
+
+        truck_box_world = boxes_gpu[truck_g_idx]
+        cx, cy, cz, w, l, h, yaw = truck_box_world
+
+        # --- 1. Define the Chassis Box (using BOTTOM CENTER) ---
+        dims_chassis = torch.tensor([l, w, hitch_height], device=device)
+        # The bottom of the truck is at z = cz - h / 2.0. This is the correct Z for mmcv.
+        z_bottom_chassis = cz - h / 2.0
+        bottom_center_chassis = torch.tensor([cx, cy, z_bottom_chassis], device=device)
+
+        box_chassis_def = torch.cat([
+            bottom_center_chassis, dims_chassis, yaw.unsqueeze(0)
+        ]).unsqueeze(0)
+
+        #print(box_chassis_def)
+
+        # --- 2. Define the Cab Box (using BOTTOM CENTER) ---
+        T_world_from_truck = transform_matrix_pytorch(truck_box_world[:3], torch_quat_from_yaw(yaw))
+        T_truck_from_world = torch.linalg.inv(T_world_from_truck)
+
+        boundary_x_local = -l / 2.0
+        if ID_TRAILER in overlapping_classes:
+            try:
+                trailer_g_idx = next(b_idx for b_idx in box_indices_tuple if box_cls_labels[b_idx] == ID_TRAILER)
+                trailer_box_world = boxes_gpu[trailer_g_idx]
+                trailer_center_world_homo = torch.cat([trailer_box_world[:3], torch.tensor([1.0], device=device)])
+                trailer_center_local = (T_truck_from_world @ trailer_center_world_homo)[:3]
+                boundary_x_local = trailer_center_local[0] + trailer_box_world[4] / 2.0
+            except StopIteration:
+                pass
+
+        cab_len = l / 2.0 - boundary_x_local
+        cab_height = h - hitch_height
+        dims_cab = torch.tensor([cab_len, w, cab_height], device=device)
+
+        # Calculate the BOTTOM center of the cab in the truck's local frame
+        center_x_cab_local = boundary_x_local + cab_len / 2.0
+        center_y_cab_local = 0.0
+        # The bottom of the cab is at the hitch height plane.
+        z_bottom_cab_local = (-h / 2.0) + hitch_height
+
+        # Transform this local bottom center point back to the rotated world frame
+        bottom_center_cab_local_homo = torch.tensor([center_x_cab_local, center_y_cab_local, z_bottom_cab_local, 1.0],
+                                                    device=device)
+        bottom_center_cab_world = (T_world_from_truck @ bottom_center_cab_local_homo)[:3]
+
+        box_cab_def = torch.cat([
+            bottom_center_cab_world, dims_cab, yaw.unsqueeze(0)
+        ]).unsqueeze(0)
+
+        #print(box_cab_def)
+
+        # --- 3. Run points_in_boxes for each box ---
+        points_b = points_to_process_gpu.unsqueeze(0)
+
+        #pts_np = points_b.squeeze(0).cpu().numpy().astype(np.float64)
+        #visualize_pointcloud(pts_np)
+
+        in_chassis_indices = points_in_boxes_all(points_b, box_chassis_def.unsqueeze(0))
+        in_chassis_mask = in_chassis_indices.squeeze(0).squeeze(-1).bool()
+
+        in_cab_indices = points_in_boxes_all(points_b, box_cab_def.unsqueeze(0))
+
+        in_cab_mask = in_cab_indices.squeeze(0).squeeze(-1).bool()
+
+        # --- 4. Combine Results ---
+        is_truck_point = in_chassis_mask | in_cab_mask
+
+        other_class = ID_TRAILER if ID_TRAILER in overlapping_classes else ID_FORKLIFT
+        final_labels_for_group = torch.where(is_truck_point, ID_TRUCK, other_class)
+
+        """labels_np = final_labels_for_group.cpu().numpy().reshape(-1, 1)
+        pts_classed = np.hstack((pts_np, labels_np))
+        visualize_pointcloud(pts_classed)
+        print(pts_classed)
+
+        box_defs_np = [
+            box_chassis_def.squeeze(0).cpu().numpy(),
+            box_cab_def.squeeze(0).cpu().numpy()
+        ]
+
+        viz_boxes = []
+        for box_def in box_defs_np:
+            bottom_center = box_def[:3]
+            # Dims are [width, length, height] which corresponds to the 'wlh' attribute
+            dims = box_def[3:6]
+            h = dims[2]
+            yaw = box_def[6] - np.pi / 2.0
+
+            # 1. Calculate the geometric center (same as before)
+            geometric_center = bottom_center + np.array([0, 0, h / 2.0])
+
+            # 2. Create a Quaternion from the yaw angle
+            # This represents a rotation around the Z-axis.
+            orientation = Quaternion(axis=[0, 0, 1], angle=yaw)
+
+            # 3. Instantiate the truckscenes/nuscenes Box object
+            # This object will have the .wlh attribute that your function needs.
+            ts_box = Box(
+                center=geometric_center,
+                size=dims,  # [w, l, h]
+                orientation=orientation
+            )
+            viz_boxes.append(ts_box)
+
+        visualize_pointcloud_bbox(pts_classed, boxes=viz_boxes)"""
+
+
+        new_labels_gpu[point_indices_gpu] = final_labels_for_group.long()
+
+    new_labels_cpu = new_labels_gpu.cpu().numpy()
+    reassigned_indices = torch.where(original_labels_gpu != new_labels_gpu)[0].cpu().numpy().tolist()
+
+    print(f"Refinement complete. {len(reassigned_indices)} points were reassigned using the Dual OBB method.")
+    return new_labels_cpu.reshape(-1, 1), reassigned_indices
