@@ -2,6 +2,7 @@ import numpy as np
 import os
 from tqdm import tqdm
 import torch
+import sys
 import time
 import yaml
 import os.path as osp
@@ -10,7 +11,7 @@ from truckscenes.truckscenes import TruckScenes
 from utils.pointcloud_loading import load_lidar_entries, group_entries, get_rigid_fused_pointcloud, get_pointwise_fused_pointcloud
 from utils.bbox_utils import transform_boxes_to_ego
 import open3d as o3d
-from mmcv.ops.points_in_boxes import (points_in_boxes_cpu)
+from mmcv.ops.points_in_boxes import (points_in_boxes_cpu, points_in_boxes_all)
 from pyquaternion import Quaternion
 import matplotlib.pyplot as plt
 from truckscenes.utils.geometry_utils import transform_matrix
@@ -24,6 +25,10 @@ from utils.custom_datasets import InMemoryDataset, InMemoryDatasetMapMOS
 from utils.data_utils import save_gnss_to_directory, save_poses_to_kitti_format, save_pcds_to_directory, save_gnss_to_single_file, parse_single_annotation_file
 
 def main(trucksc, indice, truckscenesyaml, args, config):
+    ################ Set device ################################
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print(f"Using device: {device}")
+
     ########################## Extract parameters from config and args #############################################
     save_path = args.save_path  # Directory where processed data will be saved
     data_root = args.dataroot  # Root directory of dataset
@@ -384,32 +389,20 @@ def main(trucksc, indice, truckscenesyaml, args, config):
 
         ############################# cut out movable object points and masks ##########################
         points_to_check_np = sensor_fused_pc.points.T[:, :3][np.newaxis, :, :]
-        points_to_check_tensor = torch.from_numpy(points_to_check_np).float()
+        points_to_check_tensor_gpu = torch.from_numpy(points_to_check_np).float().to(device)
 
         boxes_to_check_np = gt_bbox_3d_points_in_boxes_cpu_enlarged[np.newaxis, :]
-        boxes_to_check_tensor = torch.from_numpy(boxes_to_check_np).float()
+        boxes_to_check_tensor_gpu = torch.from_numpy(boxes_to_check_np).float().to(device)
 
-        """start_time_gpu = time.perf_counter()
-
-        points_to_check_tensor_gpu = points_to_check_tensor.cuda()
-        boxes_to_check_tensor_gpu = boxes_to_check_tensor.cuda()
-
-        points_in_boxes = points_in_boxes_all(points_to_check_tensor_gpu,
+        points_in_boxes_gpu = points_in_boxes_all(points_to_check_tensor_gpu,
                                               boxes_to_check_tensor_gpu)  # use function to identify which points belong to which bounding box
 
-        end_time_gpu = time.perf_counter()
-        gpu_time = end_time_gpu - start_time_gpu
-        print(f"GPU time for one iteration: {gpu_time:.6f} seconds")"""
+        points_in_boxes = points_in_boxes_gpu.cpu()
 
-        #start_time_cpu = time.perf_counter()
-
-        points_in_boxes = points_in_boxes_cpu(
+        """points_in_boxes_gpu = points_in_boxes_cpu(
             points_to_check_tensor,
-            boxes_to_check_tensor)  # use function to identify which points belong to which bounding box
+            boxes_to_check_tensor)  # use function to identify which points belong to which bounding box"""
 
-        #end_time_cpu = time.perf_counter()
-        #cpu_time = end_time_cpu - start_time_cpu
-        #print(f"CPU time for one iteration: {cpu_time:.6f} seconds")
 
         #################################### Mask for the ego vehicle itself #######################################
         points_xyz = sensor_fused_pc.points.T[:, :3]
@@ -527,11 +520,19 @@ def main(trucksc, indice, truckscenesyaml, args, config):
         print(f"Number of points on ego vehicle: {num_ego_points}")
 
         ################################# Dynamic point filtering of static map with max enlarged boxes##################
+        boxes_to_check_max_enlarged_tensor_gpu = torch.from_numpy(gt_bbox_3d_points_in_boxes_cpu_max_enlarged[np.newaxis, :]).to(device).float()
 
-        points_in_boxes_max_enlarged = points_in_boxes_cpu(
-            torch.from_numpy(sensor_fused_pc.points.T[:, :3][np.newaxis, :, :]),
-            torch.from_numpy(gt_bbox_3d_points_in_boxes_cpu_max_enlarged[np.newaxis, :])
+        points_in_boxes_max_enlarged_gpu = points_in_boxes_all(
+            points_to_check_tensor_gpu,
+            boxes_to_check_max_enlarged_tensor_gpu
         )
+
+        points_in_boxes_max_enlarged = points_in_boxes_max_enlarged_gpu.cpu()
+
+        """points_in_boxes_max_enlarged = points_in_boxes_cpu(
+            points_to_check_tensor_gpu,
+            torch.from_numpy(gt_bbox_3d_points_in_boxes_cpu_max_enlarged[np.newaxis, :])
+        )"""
 
         dynamic_mask_max_enlarged = points_in_boxes_max_enlarged[0].any(dim=-1).cpu().numpy()
 
@@ -1006,8 +1007,6 @@ def main(trucksc, indice, truckscenesyaml, args, config):
             print(
                 f"Static points list mapmos: {len(static_points_refined)} frames with sensor ids: {len(static_points_refined_sensor_ids)}")
 
-        visualize_pointcloud(static_points_refined[0])
-
     else:
         print("Proceeding without running MapMOS pipeline.")
         # Define default lists that will be used if MapMOS is skipped
@@ -1249,106 +1248,206 @@ def main(trucksc, indice, truckscenesyaml, args, config):
         source_pc_list_all_frames = refined_lidar_pc_list
         source_pc_sids_list_all_frames = static_points_refined_sensor_ids
 
+    ################################################################################################################
+    ################################################################################################################
+    #################################### Filtering based on if only keyframes should be used ###########################
+    print(f"Static map aggregation: --static_map_keyframes_only is {args.static_map_keyframes_only}")
+
+    lidar_pc_list_for_concat = []
+    lidar_pc_sids_list_for_concat = []
+
+    for idx, frame_info in enumerate(dict_list):
+        is_key = frame_info['is_key_frame']
+        include_in_static_map = True
+        if args.static_map_keyframes_only and not is_key:
+            include_in_static_map = False
+
+        if include_in_static_map:
+            print(f"  Including frame {idx} (Keyframe: {is_key}) in static map aggregation.")
+            if idx < len(source_pc_list_all_frames) and source_pc_list_all_frames[idx].shape[0] > 0:
+                lidar_pc_list_for_concat.append(source_pc_list_all_frames[idx])
+                if idx < len(source_pc_sids_list_all_frames) and source_pc_sids_list_all_frames[idx].shape[0] > 0:
+                    lidar_pc_sids_list_for_concat.append(source_pc_sids_list_all_frames[idx])
+                elif source_pc_list_all_frames[idx].shape[
+                    0] > 0:
+                    print(
+                        f"Warning: Frame {idx} has {source_pc_list_all_frames[idx].shape[0]} static points but missing/empty SIDs.")
+        else:
+            print(
+                f"  Skipping frame {idx} (Keyframe: {is_key}) for static map aggregation due to --static_map_keyframes_only.")
+
+    ################################### Concatenating the static point list ##############################################
+
+    if lidar_pc_list_for_concat:
+        print(f"Concatenating pc from {len(lidar_pc_list_for_concat)} frames")
+        lidar_pc_final_global = np.concatenate(lidar_pc_list_for_concat, axis=0)
+        print(f"Concatenated refined static global points. Shape: {lidar_pc_final_global.shape}")
+    else:
+        sys.exit()
+
+    if lidar_pc_sids_list_for_concat:
+        print(f"Concatenating pc sensor ids from {len(lidar_pc_sids_list_for_concat)} frames")
+        lidar_pc_final_global_sensor_ids = np.concatenate(lidar_pc_sids_list_for_concat, axis=0)
+        print(
+            f"Concatenated refined static global point sensor ids. Shape: {lidar_pc_final_global_sensor_ids.shape}")
+    else:
+        sys.exit()
+
+    assert lidar_pc_final_global.shape[0] == lidar_pc_final_global_sensor_ids.shape[0]
+
+    ################################## Visualization #############################################################
+    if args.vis_aggregated_static_kiss_refined:
+        visualize_pointcloud(lidar_pc_final_global, title=f"Aggregated Refined Static PC (Global) - Scene {scene_name}")
+    ####################################################################################################################
+
+    ########################################### Visualization of 2 frames to see aligned ################################
+    if args.vis_static_frame_comparison_kiss_refined:
+        frame_indices_to_viz = [1, 25]  # Frame 1 (index 0), Frame 25 (index 24)
+        colors = [
+            [1.0, 0.0, 0.0],  # Red for frame 1
+            [0.0, 0.0, 1.0]  # Blue for frame 25
+        ]
+
+        if len(lidar_pc_list_for_concat) <= max(frame_indices_to_viz):
+            print(
+                f"Error: refined_lidar_pc_list only has {len(lidar_pc_list_for_concat)} elements. Cannot access frame {max(frame_indices_to_viz) + 1}.")
+            sys.exit(1)
+
+        point_clouds_to_visualize = []
+
+        for i, frame_idx in enumerate(frame_indices_to_viz):
+            pc_np = lidar_pc_list_for_concat[frame_idx]
+
+            if pc_np is None or pc_np.shape[0] == 0:
+                print(f"Warning: Point cloud for frame {frame_idx + 1} (index {frame_idx}) is empty. Skipping.")
+                continue
+            if pc_np.ndim != 2 or pc_np.shape[1] < 3:
+                print(
+                    f"Warning: Point cloud for frame {frame_idx + 1} (index {frame_idx}) has unexpected shape {pc_np.shape}. Needs (N, >=3). Skipping.")
+                continue
+
+            xyz = pc_np[:, :3]
+
+            pcd = o3d.geometry.PointCloud()
+            pcd.points = o3d.utility.Vector3dVector(xyz)
+            pcd.paint_uniform_color(colors[i])
+
+            point_clouds_to_visualize.append(pcd)
+
+        if point_clouds_to_visualize:
+            print(
+                f"Visualizing Frame {frame_indices_to_viz[0] + 1} (Red) and Frame {frame_indices_to_viz[1] + 1} (Blue)...")
+            o3d.visualization.draw_geometries(
+                point_clouds_to_visualize,
+                window_name=f"Scene {scene_name} - Frame {frame_indices_to_viz[0] + 1} (Red) & {frame_indices_to_viz[1] + 1} (Blue)",
+                width=800,
+                height=600
+            )
+        else:
+            print("No valid point clouds found for the selected frames to visualize.")
+    ###############################################################################################################
+
     #################################### FlexCloud ###################################################################
 
-    io_dir = args.scene_io_dir
-    save_dir_flexcloud = os.path.join(io_dir, "flexcloud_io")
-    pos_dir = os.path.join(save_dir_flexcloud, "gnss_poses")
-    odom_path = os.path.join(save_dir_flexcloud, "odom/slam_poses.txt")
-    pcd_dir = os.path.join(save_dir_flexcloud, "point_clouds")
-    output_dir = os.path.join(save_dir_flexcloud, "output_keyframes")
-    pcd_dir_transformed = os.path.join(save_dir_flexcloud, "pcd_transformed")
+    if args.use_flexcloud:
+        io_dir = args.scene_io_dir
+        save_dir_flexcloud = os.path.join(args.scene_io_dir, "flexcloud_io")
+        pos_dir = os.path.join(save_dir_flexcloud, "gnss_poses")
+        odom_path = os.path.join(save_dir_flexcloud, "odom/slam_poses.txt")
+        pcd_dir = os.path.join(save_dir_flexcloud, "point_clouds")
+        output_dir = os.path.join(save_dir_flexcloud, "output_keyframes")
+        pcd_dir_transformed = os.path.join(save_dir_flexcloud, "pcd_transformed")
 
-    os.makedirs(pos_dir, exist_ok=True)
-    os.makedirs(pcd_dir, exist_ok=True)
-    os.makedirs(output_dir, exist_ok=True)
-    os.makedirs(pcd_dir_transformed, exist_ok=True)
-    os.makedirs(os.path.dirname(odom_path), exist_ok=True)
+        os.makedirs(pos_dir, exist_ok=True)
+        os.makedirs(pcd_dir, exist_ok=True)
+        os.makedirs(output_dir, exist_ok=True)
+        os.makedirs(pcd_dir_transformed, exist_ok=True)
+        os.makedirs(os.path.dirname(odom_path), exist_ok=True)
 
-    final_pc_path = os.path.join(save_dir_flexcloud, "aggregated_cloud.pcd")
-    agg_pc = np.concatenate(source_pc_list_all_frames, axis=0)
-    print(agg_pc.shape)
+        final_pc_path = os.path.join(save_dir_flexcloud, "aggregated_cloud.pcd")
+        print(f"Shape of input pc for flexcloud is: {lidar_pc_final_global.shape}")
 
-    pcd_agg = o3d.geometry.PointCloud()
-    pcd_agg.points = o3d.utility.Vector3dVector(agg_pc[:, :3])
-    o3d.io.write_point_cloud(final_pc_path, pcd_agg)
+        pcd_agg = o3d.geometry.PointCloud()
+        pcd_agg.points = o3d.utility.Vector3dVector(lidar_pc_final_global[:, :3])
+        o3d.io.write_point_cloud(final_pc_path, pcd_agg)
 
+        visualize_pointcloud(lidar_pc_final_global, title=f"Aggregated Refined Point Cloud")
 
-    lidar_timestamps_flexcloud = [frame_dict['sample_timestamp'] / 1e6 for frame_dict in dict_list]
+        lidar_timestamps_flexcloud = [frame_dict['sample_timestamp'] / 1e6 for frame_dict in dict_list]
 
-    # 1. Get your data from KISS-ICP and the dataset
-    kiss_icp_poses_save = poses_kiss_icp
-    point_clouds_save = source_pc_list_all_frames
-    timestamps_save = lidar_timestamps_flexcloud
-    timestamps_save_original = timestamps_save.copy()
+        # 1. Get your data from KISS-ICP and the dataset
+        kiss_icp_poses_save = poses_kiss_icp
+        point_clouds_save = source_pc_list_all_frames
+        timestamps_save = lidar_timestamps_flexcloud
+        timestamps_save_original = timestamps_save.copy()
 
-    gnss_data_save = []
-    # Define a constant, low standard deviation for all points
-    std_dev_placeholder = np.array([0.1, 0.1, 0.1])
-    for frame_dict in dict_list:
-        # 1. Get the full 4x4 transformation matrix
-        #transform_matrix_global_from_ego = frame_dict['global_from_ego_i']
+        gnss_data_save = []
+        # Define a constant, low standard deviation for all points
+        std_dev_placeholder = np.array([0.1, 0.1, 0.1])
+        for frame_dict in dict_list:
+            # 1. Get the full 4x4 transformation matrix
+            #transform_matrix_global_from_ego = frame_dict['global_from_ego_i']
 
-        transform_matrix_global_from_ego = frame_dict['ego_ref_from_ego_i']
+            transform_matrix_global_from_ego = frame_dict['ego_ref_from_ego_i']
 
-        # 2. Extract just the position (x, y, z) from the last column
-        position = transform_matrix_global_from_ego[:3, 3]
+            # 2. Extract just the position (x, y, z) from the last column
+            position = transform_matrix_global_from_ego[:3, 3]
 
-        # 3. Combine the position and standard deviation into a single 6-element array
-        gnss_entry = np.hstack((position, std_dev_placeholder))
+            # 3. Combine the position and standard deviation into a single 6-element array
+            gnss_entry = np.hstack((position, std_dev_placeholder))
 
-        # 4. Append the correct 6-element array to the list
-        gnss_data_save.append(gnss_entry)
+            # 4. Append the correct 6-element array to the list
+            gnss_data_save.append(gnss_entry)
 
-    file_path_gnss_all = os.path.join(args.scene_io_dir, 'flexcloud_io/all_gnss_data_poses.txt')
-    save_gnss_to_single_file(gnss_data_save, file_path_gnss_all)
+        file_path_gnss_all = os.path.join(args.scene_io_dir, 'flexcloud_io/all_gnss_data_poses.txt')
+        save_gnss_to_single_file(gnss_data_save, file_path_gnss_all)
 
-    if len(gnss_data_save) > 1:
-        print("Padding data lists to ensure interpolation coverage...")
+        if len(gnss_data_save) > 1:
+            print("Padding data lists to ensure interpolation coverage...")
 
-        # --- Pad the beginning ---
-        first_timestamp_sec = timestamps_save[0]
-        last_pose_data = gnss_data_save[-1]
+            # --- Pad the beginning ---
+            first_timestamp_sec = timestamps_save[0]
+            last_pose_data = gnss_data_save[-1]
 
-        # Add two points before the start
-        for i in range(1, 3): # Creates points for T-0.2s and T-0.1s
-            padded_timestamp = first_timestamp_sec - (i * 0.1)
+            # Add two points before the start
+            for i in range(1, 3): # Creates points for T-0.2s and T-0.1s
+                padded_timestamp = first_timestamp_sec - (i * 0.1)
 
-            # Get the closest real pose from the dataset
-            ego_pose_rec = trucksc.getclosest("ego_pose", padded_timestamp * 1e6)
-            position = np.array(ego_pose_rec['translation'])
-            padded_pose_data = np.hstack((position, std_dev_placeholder))
+                # Get the closest real pose from the dataset
+                ego_pose_rec = trucksc.getclosest("ego_pose", padded_timestamp * 1e6)
+                position = np.array(ego_pose_rec['translation'])
+                padded_pose_data = np.hstack((position, std_dev_placeholder))
 
-            # Insert into all three lists
-            gnss_data_save.insert(0, padded_pose_data)
-            timestamps_save.insert(0, padded_timestamp)
+                # Insert into all three lists
+                gnss_data_save.insert(0, padded_pose_data)
+                timestamps_save.insert(0, padded_timestamp)
 
-        # --- Pad the end ---
-        last_timestamp_sec = timestamps_save[-1]
+            # --- Pad the end ---
+            last_timestamp_sec = timestamps_save[-1]
 
-        # Add two points after the end
-        for i in range(1, 4):  # Creates points for T+0.1s and T+0.2s
-            padded_timestamp = last_timestamp_sec + (i * 0.1)
+            # Add two points after the end
+            for i in range(1, 4):  # Creates points for T+0.1s and T+0.2s
+                padded_timestamp = last_timestamp_sec + (i * 0.1)
 
-            # Get the closest real pose from the dataset
-            #ego_pose_rec = trucksc.getclosest("ego_pose", padded_timestamp * 1e6)
-            #position = np.array(ego_pose_rec['translation'])
-            #padded_pose_data = np.hstack((position, std_dev_placeholder))
+                # Get the closest real pose from the dataset
+                #ego_pose_rec = trucksc.getclosest("ego_pose", padded_timestamp * 1e6)
+                #position = np.array(ego_pose_rec['translation'])
+                #padded_pose_data = np.hstack((position, std_dev_placeholder))
 
-            # Append to all three lists
-            #gnss_data_save.append(padded_pose_data)
-            gnss_data_save.append(last_pose_data)
-            timestamps_save.append(padded_timestamp)
+                # Append to all three lists
+                #gnss_data_save.append(padded_pose_data)
+                gnss_data_save.append(last_pose_data)
+                timestamps_save.append(padded_timestamp)
 
-        print(f"Padded all lists. New total items: {len(timestamps_save)}")
+            print(f"Padded all lists. New total items: {len(timestamps_save)}")
 
-    config_path_select_keyframes = "/flexcloud/config/select_keyframes.yaml"
-    config_path_pcd_georef = "/flexcloud/config/pcd_georef.yaml"
+        config_path_select_keyframes = "/flexcloud/config/select_keyframes.yaml"
+        config_path_pcd_georef = "/flexcloud/config/pcd_georef.yaml"
 
-    # 3. Save your in-memory data to the temporary files
-    save_poses_to_kitti_format(kiss_icp_poses_save, odom_path)
-    save_gnss_to_directory(gnss_data_save, timestamps_save, pos_dir)
-    save_pcds_to_directory(point_clouds_save, timestamps_save_original, pcd_dir)
+        # 3. Save your in-memory data to the temporary files
+        save_poses_to_kitti_format(kiss_icp_poses_save, odom_path)
+        save_gnss_to_directory(gnss_data_save, timestamps_save, pos_dir)
+        save_pcds_to_directory(point_clouds_save, timestamps_save_original, pcd_dir)
 
     ######################### Save all data ##########################
     context_file_path = os.path.join(args.scene_io_dir, "preprocessed_data.npz")
@@ -1357,14 +1456,16 @@ def main(trucksc, indice, truckscenesyaml, args, config):
     np.savez_compressed(
         context_file_path,
         # --- Essential Data ---
-        source_pc_list_all_frames=np.array(source_pc_list_all_frames, dtype=object),
+        #source_pc_list_all_frames=np.array(source_pc_list_all_frames, dtype=object),
         # Use dtype=object for lists of arrays
-        source_pc_sids_list_all_frames=np.array(source_pc_sids_list_all_frames, dtype=object),
+        #source_pc_sids_list_all_frames=np.array(source_pc_sids_list_all_frames, dtype=object),
+        lidar_pc_final_global=lidar_pc_final_global,
+        lidar_pc_final_global_sensor_ids=lidar_pc_final_global_sensor_ids,
         dict_list=np.array(dict_list, dtype=object),
         poses_kiss_icp=poses_kiss_icp,  # Can be None if ICP was skipped
         # --- Config/Args needed by Part 3 ---
         config=np.array(config, dtype=object),
-        truckscenesyaml=np.array(truckscenesyaml, dtype=object),
+        #truckscenesyaml=np.array(truckscenesyaml, dtype=object),
         learning_map=np.array(learning_map, dtype=object),
         learning_id_to_name=np.array(learning_id_to_name, dtype=object),
         category_name_to_learning_id=np.array(category_name_to_learning_id, dtype=object),
@@ -1373,7 +1474,7 @@ def main(trucksc, indice, truckscenesyaml, args, config):
         occ_size=np.array(occ_size, dtype=object),
         save_path=save_path,
         scene_name=scene_name,
-        args_dict=np.array(vars(args), dtype=object),  # Save args as a dictionary
+        #args_dict=np.array(vars(args), dtype=object),  # Save args as a dictionary
         # --- Constants ---
         FREE_LEARNING_INDEX=FREE_LEARNING_INDEX,
         BACKGROUND_LEARNING_INDEX=BACKGROUND_LEARNING_INDEX,
@@ -1385,42 +1486,66 @@ def main(trucksc, indice, truckscenesyaml, args, config):
 
     print("Finished saving data dict")
 
-    # Get the first and last lidar timestamps
-    first_lidar_timestamp = dict_list[0]['sample_timestamp']
-    last_lidar_timestamp = dict_list[-1]['sample_timestamp']
+    if args.save_rosbag_data:
+        # Get the first and last lidar timestamps
+        first_lidar_timestamp = dict_list[0]['sample_timestamp']
+        last_lidar_timestamp = dict_list[-1]['sample_timestamp']
 
-    # Define a time buffer (e.g., 1 second)
-    buffer_time = 1e6  # in microseconds
+        # Calculate the start and end timestamps for interpolation
+        start_timestamp_imu = first_lidar_timestamp
+        end_timestamp_imu = last_lidar_timestamp
 
-    # Calculate the start and end timestamps for interpolation
-    start_timestamp_imu = first_lidar_timestamp - buffer_time
-    end_timestamp_imu = last_lidar_timestamp + buffer_time
+        # Define the desired IMU frequency (e.g., 100 Hz)
+        imu_freq = 100
+        # Calculate the time step in microseconds
+        time_step = int(1e6 / imu_freq)
 
-    # Define the desired IMU frequency (e.g., 100 Hz)
-    imu_freq = 100
-    # Calculate the time step in microseconds
-    time_step = int(1e6 / imu_freq)
+        # Create a new array of timestamps
+        high_freq_timestamps = np.arange(start_timestamp_imu, end_timestamp_imu, time_step)
 
-    # Create a new array of timestamps
-    high_freq_timestamps = np.arange(start_timestamp_imu, end_timestamp_imu, time_step)
+        # Use tqdm to show progress for the list comprehension
+        #imu_data = [transform_imu_to_ego(truckscenes.getclosest("ego_motion_chassis", timest), calibrated_sensor_record_imu)
+         #           for timest in tqdm(high_freq_timestamps, desc="Fetching IMU Data")]
 
-    # Use tqdm to show progress for the list comprehension
-    imu_data = [transform_imu_to_ego(truckscenes.getclosest("ego_motion_chassis", timest), calibrated_sensor_record_imu)
-                for timest in tqdm(high_freq_timestamps, desc="Fetching IMU Data")]
-    #print(IMU_data)
+        imu_data = [truckscenes.getclosest("ego_motion_chassis", timest)
+                   for timest in tqdm(high_freq_timestamps, desc="Fetching IMU Data")]
 
-    print("Saving data to create rosbag...")
+        print(f"Filtering {len(imu_data)} raw IMU records to remove duplicates...")
 
-    context_file_path_rosbag = os.path.join(args.scene_io_dir, "preprocessed_data_rosbag.npz")
-    print(f"Saving data to {context_file_path_rosbag}")
-    np.savez_compressed(
-        context_file_path_rosbag,
-        dict_list=np.array(dict_list_rosbag, dtype=object),
-        poses_kiss_icp=poses_kiss_icp,
-        scene_name=scene_name,
-        save_path=save_path,
-        IMU_data=np.array(imu_data, dtype=object),
-    )
+        unique_imu_data = []
+        if imu_data:  # Make sure the list is not empty
+            # Add the first record to start
+            unique_imu_data.append(imu_data[0])
+
+            # Iterate through the rest of the records
+            for i in range(1, len(imu_data)):
+                # Compare the token of the current record to the token of the last added unique record
+                if imu_data[i]['token'] != unique_imu_data[-1]['token']:
+                    unique_imu_data.append(imu_data[i])
+
+        imu_data = unique_imu_data
+        print(f"Finished filtering. Found {len(imu_data)} unique IMU records.")
+        #print(imu_data)
+
+        print("Finished fetching IMU Data")
+
+        print(calibrated_sensor_record_imu)
+
+        print("Saving data to create rosbag...")
+
+        context_file_path_rosbag = os.path.join(args.scene_io_dir, "preprocessed_data_rosbag.npz")
+        print(f"Saving data to {context_file_path_rosbag}")
+        np.savez_compressed(
+            context_file_path_rosbag,
+            dict_list=np.array(dict_list_rosbag, dtype=object),
+            poses_kiss_icp=poses_kiss_icp,
+            scene_name=scene_name,
+            save_path=save_path,
+            IMU_data=np.array(imu_data, dtype=object),
+            imu_calib=np.array(calibrated_sensor_record_imu, dtype=object),
+        )
+
+
     print(f"\n--- Part 1 Complete ---")
     print(f"Saved pipeline context to {context_file_path}")
     print(f"FlexCloud inputs are ready in: {save_dir_flexcloud}")
@@ -1491,6 +1616,19 @@ if __name__ == '__main__':
                        help='Enable aggregated static global pc visualization')
     parse.add_argument('--vis_aggregated_raw_pc_ego_i', action='store_true',
                        help='Enable aggregated raw pc ego i visualization')
+
+    parse.add_argument('--vis_static_frame_comparison_kiss_refined', action='store_true',
+                       help='Enable static frame comparison kiss refinement')
+    parse.add_argument('--vis_aggregated_static_kiss_refined', action='store_true',
+                       help='Enable aggregated static kiss refinement')
+
+    ###################### Decide if you want to use keyframes only for static map ############################################
+    parse.add_argument('--static_map_keyframes_only', action='store_true',
+                       help='Build the final static map using only keyframes (after ICP, if enabled, ran on all frames).')
+
+    ##################### Process input for Rosbag file creation and save input #########################################
+    parse.add_argument('--save_rosbag_data', action='store_true', help='Save rosbag data')
+    parse.add_argument('--use_flexcloud', action='store_true', help='Use flexcloud as postprocessing')
 
 
     args = parse.parse_args()
