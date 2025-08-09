@@ -11,18 +11,22 @@ from collections import defaultdict
 from utils.visualization import visualize_pointcloud, visualize_pointcloud_bbox, visualize_occupancy_o3d, calculate_and_plot_pose_errors
 from utils.pointcloud_processing import denoise_pointcloud
 from truckscenes.utils.geometry_utils import transform_matrix
-from mmcv.ops.points_in_boxes import (points_in_boxes_cpu)
+from mmcv.ops.points_in_boxes import (points_in_boxes_cpu, points_in_boxes_all)
 # import chamfer
 from pyquaternion import Quaternion
 from utils.occupancy_utils import calculate_camera_visibility_gpu_host, calculate_lidar_visibility_gpu_host, calculate_camera_visibility_cpu, calculate_lidar_visibility
 from utils.pointcloud_processing import in_range_mask, preprocess_cloud, create_mesh_from_map, preprocess
 from utils.constants import CLASS_COLOR_MAP, STATE_FREE, STATE_UNOBSERVED, STATE_OCCUPIED, DEFAULT_COLOR
-from utils.refinement import assign_label_by_L_shape
+from utils.refinement import assign_label_by_L_shape, assign_label_by_L_shape_optimized
 from utils.bbox_utils import is_point_centroid_z_similar, are_box_sizes_similar, get_object_overlap_signature_BATCH, compare_signatures_class_based_OVERLAP_RATIO
 from utils.data_utils import load_kitti_poses
 
 def main(args):
     print("--- Running Part 3: Post-FlexCloud Processing ---")
+
+    ################ Set device ################################
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print(f"Using device: {device}")
 
     save_dir_flexcloud = args.scene_io_dir
     context_file_path = os.path.join(save_dir_flexcloud, "preprocessed_data.npz")
@@ -30,13 +34,13 @@ def main(args):
     # --- Load the saved context from Part 1 ---
     print(f"Loading pipeline context from {context_file_path}...")
     context = np.load(context_file_path, allow_pickle=True)
-    source_pc_list_all_frames = context['source_pc_list_all_frames']
-    source_pc_sids_list_all_frames = context['source_pc_sids_list_all_frames']
+    #source_pc_list_all_frames = context['source_pc_list_all_frames']
+    #source_pc_sids_list_all_frames = context['source_pc_sids_list_all_frames']
     dict_list = context['dict_list']
     poses_kiss_icp = context['poses_kiss_icp']  # This might be None
     config = context['config'].item()  # .item() to get the dictionary back
-    truckscenesyaml = context['truckscenesyaml'].item()
-    learning_map = context['learning_map'].item()
+    #truckscenesyaml = context['truckscenesyaml'].item()
+    #learning_map = context['learning_map'].item()
     category_name_to_learning_id = context['category_name_to_learning_id'].item()
     learning_id_to_name = context['learning_id_to_name'].item()
     pc_range = context['pc_range']
@@ -44,27 +48,54 @@ def main(args):
     occ_size = context['occ_size']
     save_path = str(context['save_path'])
     scene_name = str(context['scene_name'])
-    args_dict = context['args_dict'].item()
+    # args_dict = context['args_dict'].item()
     FREE_LEARNING_INDEX = context['FREE_LEARNING_INDEX'].item()
     BACKGROUND_LEARNING_INDEX = context['BACKGROUND_LEARNING_INDEX'].item()
     sensors = context['sensors']
     cameras = context['cameras']
     sensor_max_ranges_arr = context['sensor_max_ranges_arr']
     self_range = context['self_range']
+    lidar_pc_final_global=context['lidar_pc_final_global']
+    lidar_pc_final_global_sensor_ids=context['lidar_pc_final_global_sensor_ids']
+
 
     # Load the corrected poses from FlexCloud's output ---
-    flexcloud_output_dir = os.path.join(save_dir_flexcloud, "flexcloud_io", "output_keyframes")
-    kitti_poses_path = os.path.join(flexcloud_output_dir, "kitti_poses.txt")
+    flexcloud_output_dir = os.path.join(save_dir_flexcloud, "flexcloud_io/pcd_transformed")
+    flexcloud_xyz_poses_path = os.path.join(flexcloud_output_dir, "traj_matching/target_rs.txt")
 
-    print(f"Loading corrected poses from {kitti_poses_path}...")
-    flexcloud_corrected_poses = load_kitti_poses(kitti_poses_path)
+    print(f"Loading corrected poses from {flexcloud_xyz_poses_path}...")
 
-    if flexcloud_corrected_poses.shape[0] == 0:
-        print("Could not load corrected poses. Exiting.")
+    if not os.path.exists(flexcloud_xyz_poses_path):
+        print(f"File not found: {flexcloud_xyz_poses_path}")
         sys.exit(1)
 
-    print(f"Successfully loaded {flexcloud_corrected_poses.shape[0]} corrected poses.")
+    try:
+        # Use np.loadtxt to load the xyz values directly into a 2D array
+        flexcloud_corrected_poses_xyz = np.loadtxt(flexcloud_xyz_poses_path)
+        print("Successfully loaded xyz poses.")
+    except Exception as e:
+        print(f"Could not load corrected poses. Error: {e}")
+        sys.exit(1)
 
+    if flexcloud_corrected_poses_xyz.shape[0] == 0 or flexcloud_corrected_poses_xyz.shape[1] != 3:
+        print("Corrected poses data is empty or has an incorrect format. Exiting.")
+        sys.exit(1)
+
+    num_frames = poses_kiss_icp.shape[0]
+    if flexcloud_corrected_poses_xyz.shape[0] != num_frames:
+        print(
+            f"Mismatch in number of frames. KISS-ICP has {num_frames}, FlexCloud has {flexcloud_corrected_poses_xyz.shape[0]}.")
+        sys.exit(1)
+
+    print(f"Number of frames: {flexcloud_corrected_poses_xyz.shape}")
+
+    flexcloud_corrected_poses = poses_kiss_icp.copy()
+
+    for i in range(num_frames):
+        # This line now correctly accesses the i-th pose matrix and its translation vector
+        flexcloud_corrected_poses[i, :3, 3] = flexcloud_corrected_poses_xyz[i, :]
+
+    print(f"Successfully loaded {flexcloud_corrected_poses.shape[0]} corrected poses.")
 
     gt_poses = np.array([frame['ego_ref_from_ego_i'] for frame in dict_list])
     kiss_poses = context['poses_kiss_icp']
@@ -142,106 +173,41 @@ def main(args):
         }
     }
 
-    ################################################################################################################
-    ################################################################################################################
-    #################################### Filtering based on if only keyframes should be used ###########################
-    print(f"Static map aggregation: --static_map_keyframes_only is {args.static_map_keyframes_only}")
+    point_cloud_flexcloud_path = os.path.join(flexcloud_output_dir, "refined_map.pcd")
+    point_cloud_flexcloud = o3d.io.read_point_cloud(point_cloud_flexcloud_path)
+    point_cloud_flexcloud_np = np.array(point_cloud_flexcloud.points)
 
-    lidar_pc_list_for_concat = []
-    lidar_pc_sids_list_for_concat = []
+    visualize_pointcloud(point_cloud_flexcloud_np)
 
-    for idx, frame_info in enumerate(dict_list):
-        is_key = frame_info['is_key_frame']
-        include_in_static_map = True
-        if args.static_map_keyframes_only and not is_key:
-            include_in_static_map = False
+    unrefined_pc_ego_ref_list = []
 
-        if include_in_static_map:
-            print(f"  Including frame {idx} (Keyframe: {is_key}) in static map aggregation.")
-            if idx < len(source_pc_list_all_frames) and source_pc_list_all_frames[idx].shape[0] > 0:
-                lidar_pc_list_for_concat.append(source_pc_list_all_frames[idx])
-                if idx < len(source_pc_sids_list_all_frames) and source_pc_sids_list_all_frames[idx].shape[0] > 0:
-                    lidar_pc_sids_list_for_concat.append(source_pc_sids_list_all_frames[idx])
-                elif source_pc_list_all_frames[idx].shape[
-                    0] > 0:
-                    print(
-                        f"Warning: Frame {idx} has {source_pc_list_all_frames[idx].shape[0]} static points but missing/empty SIDs.")
-        else:
-            print(
-                f"  Skipping frame {idx} (Keyframe: {is_key}) for static map aggregation due to --static_map_keyframes_only.")
+    for pose_index, frame_dict in enumerate(dict_list):
+        if frame_dict['is_key_frame']:
+            pc_to_transform = frame_dict['lidar_pc_ego_i']
+            xyz_points = pc_to_transform[:, :3]
+            label_col = pc_to_transform[:, 3:]
 
-    ################################### Concatenating the static point list ##############################################
+            pose_to_transform = flexcloud_corrected_poses[pose_index]
 
-    if lidar_pc_list_for_concat:
-        print(f"Concatenating pc from {len(lidar_pc_list_for_concat)} frames")
-        lidar_pc_final_global = np.concatenate(lidar_pc_list_for_concat, axis=0)
-        print(f"Concatenated refined static global points. Shape: {lidar_pc_final_global.shape}")
-    else:
-        sys.exit()
+            ones_col = np.ones((xyz_points.shape[0], 1))
+            homogeneous_pc = np.hstack([xyz_points, ones_col])
 
-    if lidar_pc_sids_list_for_concat:
-        print(f"Concatenating pc sensor ids from {len(lidar_pc_sids_list_for_concat)} frames")
-        lidar_pc_final_global_sensor_ids = np.concatenate(lidar_pc_sids_list_for_concat, axis=0)
-        print(f"Concatenated refined static global point sensor ids. Shape: {lidar_pc_final_global_sensor_ids.shape}")
-    else:
-        sys.exit()
+            transformed_homogeneous = pose_to_transform @ homogeneous_pc.T
+            tranformed_pc_ego_ref_xyz = transformed_homogeneous.T[:, :3]
 
-    assert lidar_pc_final_global.shape[0] == lidar_pc_final_global_sensor_ids.shape[0]
+            tranformed_pc_ego_ref = np.hstack([tranformed_pc_ego_ref_xyz, label_col])
 
-    ################################## Visualization #############################################################
-    if args.vis_aggregated_static_kiss_refined:
-        visualize_pointcloud(lidar_pc_final_global, title=f"Aggregated Refined Static PC (Global) - Scene {scene_name}")
-    ####################################################################################################################
+            unrefined_pc_ego_ref_list.append(tranformed_pc_ego_ref)
+
+    unrefined_pc = np.concatenate(unrefined_pc_ego_ref_list, axis=0)
+
+    visualize_pointcloud(unrefined_pc)
+
+
+
 
     lidar_pc = lidar_pc_final_global.T
     lidar_pc_sensor_ids = lidar_pc_final_global_sensor_ids
-
-    ########################################### Visualization of 2 frames to see aligned ################################
-    if args.vis_static_frame_comparison_kiss_refined:
-        frame_indices_to_viz = [1, 25]  # Frame 1 (index 0), Frame 25 (index 24)
-        colors = [
-            [1.0, 0.0, 0.0],  # Red for frame 1
-            [0.0, 0.0, 1.0]  # Blue for frame 25
-        ]
-
-        if len(lidar_pc_list_for_concat) <= max(frame_indices_to_viz):
-            print(
-                f"Error: refined_lidar_pc_list only has {len(lidar_pc_list_for_concat)} elements. Cannot access frame {max(frame_indices_to_viz) + 1}.")
-            sys.exit(1)
-
-        point_clouds_to_visualize = []
-
-        for i, frame_idx in enumerate(frame_indices_to_viz):
-            pc_np = lidar_pc_list_for_concat[frame_idx]
-
-            if pc_np is None or pc_np.shape[0] == 0:
-                print(f"Warning: Point cloud for frame {frame_idx + 1} (index {frame_idx}) is empty. Skipping.")
-                continue
-            if pc_np.ndim != 2 or pc_np.shape[1] < 3:
-                print(
-                    f"Warning: Point cloud for frame {frame_idx + 1} (index {frame_idx}) has unexpected shape {pc_np.shape}. Needs (N, >=3). Skipping.")
-                continue
-
-            xyz = pc_np[:, :3]
-
-            pcd = o3d.geometry.PointCloud()
-            pcd.points = o3d.utility.Vector3dVector(xyz)
-            pcd.paint_uniform_color(colors[i])
-
-            point_clouds_to_visualize.append(pcd)
-
-        if point_clouds_to_visualize:
-            print(
-                f"Visualizing Frame {frame_indices_to_viz[0] + 1} (Red) and Frame {frame_indices_to_viz[1] + 1} (Blue)...")
-            o3d.visualization.draw_geometries(
-                point_clouds_to_visualize,
-                window_name=f"Scene {scene_name} - Frame {frame_indices_to_viz[0] + 1} (Red) & {frame_indices_to_viz[1] + 1} (Blue)",
-                width=800,
-                height=600
-            )
-        else:
-            print("No valid point clouds found for the selected frames to visualize.")
-    ###############################################################################################################
 
     ################################## Filtering of static aggregated point cloud #####################################
     if args.filter_aggregated_static_pc and args.filter_mode != 'none':
@@ -463,11 +429,11 @@ def main(args):
                 # Only filter if there are points to filter
                 if original_count > 0:
                     # Prepare tensors for the operation
-                    points_tensor = torch.from_numpy(points_in_scene_xyz[np.newaxis, :, :]).float()
-                    box_tensor = torch.from_numpy(bbox_for_filtering[np.newaxis, :, :]).float()
+                    points_tensor_gpu = torch.from_numpy(points_in_scene_xyz[np.newaxis, :, :]).float().to(device)
+                    box_tensor_gpu = torch.from_numpy(bbox_for_filtering[np.newaxis, :, :]).float().to(device)
 
                     # Get the box indices for each point
-                    box_indices_tensor = points_in_boxes_cpu(points_tensor, box_tensor)
+                    box_indices_tensor = points_in_boxes_all(points_tensor_gpu, box_tensor_gpu)
 
                     points_in_box_mask = (box_indices_tensor[0, :, 0] >= 0)
 
@@ -532,8 +498,8 @@ def main(args):
         all_points_per_box = dynamic_object_points_list
 
         points_in_boxes = points_in_boxes_cpu(
-            torch.from_numpy(dyn_points[np.newaxis, :, :]),
-            torch.from_numpy(boxes_for_mmcv_check[np.newaxis, :, :])
+            torch.from_numpy(dyn_points[np.newaxis, :, :]), #.float().to(device),
+            torch.from_numpy(boxes_for_mmcv_check[np.newaxis, :, :]) #.float().to(device),
         )
 
         point_counts = points_in_boxes[0].sum(axis=1).numpy()
@@ -576,6 +542,19 @@ def main(args):
                 ID_FORKLIFT=OTHER_VEHICLE_ID,
                 high_overlap_threshold=0.85,
             )
+
+            """final_dyn_labels, reassigned_indices = assign_label_by_L_shape_optimized(
+                overlap_idxs=truly_ambiguous_idxs,  # Pass only points with true inter-class ambiguity
+                pt_to_box_map=pt_to_box_map,
+                points=dyn_points,
+                boxes=boxes_for_lshape_logic,
+                box_cls_labels=box_categories,
+                pt_labels=labels_before_refinement,
+                ID_TRAILER=TRAILER_ID,
+                ID_TRUCK=TRUCK_ID,
+                ID_FORKLIFT=OTHER_VEHICLE_ID,
+                device=device
+            )"""
 
             # --- Step 4: Update the labels within our semantic dynamic points array ---
             dyn_points_semantic[:, 3] = final_dyn_labels.flatten()
@@ -1093,8 +1072,6 @@ def main(args):
         continue
 
 
-
-
     ################################################################################################################
     ################################################################################################################
 
@@ -1107,6 +1084,7 @@ if __name__ == '__main__':
 
     parse = ArgumentParser()
 
+    ######################################## General settings ##################################################
     parse.add_argument('--config_path', type=str,
                        default='config_truckscenes.yaml')  # Configuration file path with default: "config.yaml"
     parse.add_argument('--save_path', type=str,
@@ -1117,10 +1095,15 @@ if __name__ == '__main__':
     parse.add_argument('--label_mapping', type=str,
                        default='truckscenes.yaml')  # YAML file containing label mappings, default: "truckscenes.yaml"
 
+    ####################################### icp settings for final alignment ###################################
     parse.add_argument('--icp_refinement', action='store_true', help='Enable ICP refinement')
     parse.add_argument('--pose_error_plot', action='store_true', help='Plot pose error')
 
+    ##################################### Use flexcloud transformed point cloud and refined poses ################
+    parse.add_argument('--use_flexcloud', type=int, default=0,
+                        help='A flag indicating whether FlexCloud processing was run (1) or not (0).')
 
+    ######################################## Filter settings ##########################################
     parse.add_argument('--filter_mode', type=str, default='none', choices=['none', 'sor', 'ror', 'both'],
                        help='Noise filtering method to apply before meshing')
 
@@ -1146,21 +1129,16 @@ if __name__ == '__main__':
     parse.add_argument('--vis_combined_static_dynamic_pc', action='store_true',
                        help='Enable combined static and dynamic pc visualization')
 
+
     parse.add_argument('--vis_lidar_visibility', action='store_true', help='Enable lidar visibility visualization')
     parse.add_argument('--vis_camera_visibility', action='store_true', help='Enable camera visibility visualization')
 
     ####################### Input data #####################################
     parse.add_argument('--scene_io_dir', type=str, required=True, help="Path to the intermediate I/O directory for the scene.")
 
-    parse.add_argument('--static_map_keyframes_only', action='store_true',
-                       help='Build the final static map using only keyframes (after ICP, if enabled, ran on all frames).')
+    ######################## Use only keyframes for static and dynamic map ##########################################
     parse.add_argument('--dynamic_map_keyframes_only', action='store_true',
                        help='Aggregate dynamic object points using only segments from keyframes..')
-
-    parse.add_argument('--vis_static_frame_comparison_kiss_refined', action='store_true',
-                       help='Enable static frame comparison kiss refinement')
-    parse.add_argument('--vis_aggregated_static_kiss_refined', action='store_true',
-                       help='Enable aggregated static kiss refinement')
 
     args = parse.parse_args()
 
