@@ -490,6 +490,53 @@ def resolve_overlap_by_distance_gpu_batched(
     return min_dists_c1 < min_dists_c2
 
 
+def _resolve_truck_overlap_with_dual_obb(
+    points_to_process: torch.Tensor,
+    truck_box: torch.Tensor,
+    trailer_box: torch.Tensor, # Can be None if no trailer is involved
+    hitch_height: float,
+    ID_TRUCK: int,
+    winning_other_class: int, # Pass in the class that wins if it's not the truck
+    device: torch.device
+) -> torch.Tensor:
+    """
+    Contains the core logic for the dual OBB (chassis/cab) test.
+    """
+    # --- This is your duplicated code, now in one place ---
+    cx, cy, cz, w, l, h, yaw = truck_box
+    dims_chassis = torch.tensor([l, w, hitch_height], device=device)
+    z_bottom_chassis = cz - h / 2.0
+    bottom_center_chassis = torch.tensor([cx, cy, z_bottom_chassis], device=device)
+    box_chassis_def = torch.cat([bottom_center_chassis, dims_chassis, yaw.unsqueeze(0)]).unsqueeze(0)
+
+    T_world_from_truck = transform_matrix_pytorch(truck_box[:3], torch_quat_from_yaw(yaw))
+    T_truck_from_world = torch.linalg.inv(T_world_from_truck)
+    boundary_x_local = -l / 2.0
+
+    if trailer_box is not None:
+        trailer_center_world_homo = torch.cat([trailer_box[:3], torch.tensor([1.0], device=device)])
+        trailer_center_local = (T_truck_from_world @ trailer_center_world_homo)[:3]
+        boundary_x_local = trailer_center_local[0] + trailer_box[4] / 2.0
+
+    cab_len = l / 2.0 - boundary_x_local
+    cab_height = h - hitch_height
+    dims_cab = torch.tensor([cab_len, w, cab_height], device=device)
+    center_x_cab_local = boundary_x_local + cab_len / 2.0
+    center_y_cab_local = 0.0
+    z_bottom_cab_local = (-h / 2.0) + hitch_height
+    bottom_center_cab_local_homo = torch.tensor([center_x_cab_local, center_y_cab_local, z_bottom_cab_local, 1.0], device=device)
+    bottom_center_cab_world = (T_world_from_truck @ bottom_center_cab_local_homo)[:3]
+    box_cab_def = torch.cat([bottom_center_cab_world, dims_cab, yaw.unsqueeze(0)]).unsqueeze(0)
+
+    points_b = points_to_process.unsqueeze(0)
+    in_chassis_mask = points_in_boxes_all(points_b, box_chassis_def.unsqueeze(0)).squeeze().bool()
+    in_cab_mask = points_in_boxes_all(points_b, box_cab_def.unsqueeze(0)).squeeze().bool()
+
+    is_truck_point = in_chassis_mask | in_cab_mask
+    final_labels = torch.where(is_truck_point, ID_TRUCK, winning_other_class)
+    return final_labels
+
+
 def assign_label_by_dual_obb_check(
         overlap_idxs: np.ndarray,
         pt_to_box_map: Dict[int, List[int]],
@@ -519,6 +566,23 @@ def assign_label_by_dual_obb_check(
     boxes[:, 3] *= 1.10
     boxes_gpu = torch.from_numpy(boxes).float().to(device)
 
+    truck_to_trailer_map = {}
+    all_truck_indices = np.where(box_cls_labels == ID_TRUCK)[0]
+    all_trailer_indices = np.where(box_cls_labels == ID_TRAILER)[0]
+
+    if all_truck_indices.size > 0 and all_trailer_indices.size > 0:
+        # Calculate IoU between all trucks and all trailers
+        iou_matrix = calculate_3d_iou_pytorch3d(
+            boxes_iou[all_truck_indices],
+            boxes_iou[all_trailer_indices]
+        )
+        # For each truck, find the trailer it overlaps with most
+        best_trailer_matches = np.argmax(iou_matrix, axis=1)
+        for i, truck_idx in enumerate(all_truck_indices):
+            # Only pair if overlap is significant
+            if iou_matrix[i, best_trailer_matches[i]] > 0.01:
+                truck_to_trailer_map[truck_idx] = all_trailer_indices[best_trailer_matches[i]]
+
     groups = defaultdict(list)
     for pi in overlap_idxs:
         box_indices = tuple(sorted(pt_to_box_map.get(pi, [])))
@@ -530,24 +594,83 @@ def assign_label_by_dual_obb_check(
     for box_indices_tuple, point_indices in tqdm(groups.items(), desc="Processing overlap groups"):
 
         overlapping_classes = {box_cls_labels[b_idx] for b_idx in box_indices_tuple}
+        point_indices_gpu = torch.tensor(point_indices, device=device, dtype=torch.long)
+        points_to_process_gpu = points_gpu[point_indices_gpu]
+
+        is_truck_trailer_forklift_case = {ID_TRUCK, ID_TRAILER, ID_FORKLIFT}.issubset(overlapping_classes)
         is_truck_trailer_case = {ID_TRUCK, ID_TRAILER}.issubset(overlapping_classes)
         is_truck_forklift_case = {ID_TRUCK, ID_FORKLIFT}.issubset(overlapping_classes)
 
-        if is_truck_trailer_case or is_truck_forklift_case:
-            point_indices_gpu = torch.tensor(point_indices, device=device, dtype=torch.long)
-            points_to_process_gpu = points_gpu[point_indices_gpu]
+        if is_truck_trailer_forklift_case:
+            print(f">>> Path Taken: 3-Way Truck-Trailer-Forklift Rule")
+            truck_idx = next(b_idx for b_idx in box_indices_tuple if box_cls_labels[b_idx] == ID_TRUCK)
 
-            try:
-                truck_g_idx = next(b_idx for b_idx in box_indices_tuple if box_cls_labels[b_idx] == ID_TRUCK)
-            except StopIteration:
-                continue
-
-            truck_box_world = boxes_gpu[truck_g_idx]
+            truck_box_world = boxes_gpu[truck_idx]
             cx, cy, cz, w, l, h, yaw = truck_box_world
 
-            # --- 1. Define the Chassis Box (using BOTTOM CENTER) ---
             dims_chassis = torch.tensor([l, w, hitch_height], device=device)
-            # The bottom of the truck is at z = cz - h / 2.0. This is the correct Z for mmcv.
+            z_bottom_chassis = cz - h / 2.0
+            bottom_center_chassis = torch.tensor([cx, cy, z_bottom_chassis], device=device)
+
+            box_chassis_def = torch.cat([
+                bottom_center_chassis, dims_chassis, yaw.unsqueeze(0)
+            ]).unsqueeze(0)
+
+            # print(box_chassis_def)
+            T_world_from_truck = transform_matrix_pytorch(truck_box_world[:3], torch_quat_from_yaw(yaw))
+            T_truck_from_world = torch.linalg.inv(T_world_from_truck)
+
+            trailer_idx = next(b_idx for b_idx in box_indices_tuple if box_cls_labels[b_idx] == ID_TRAILER)
+            trailer_box_world = boxes_gpu[trailer_idx]
+            trailer_center_world_homo = torch.cat([trailer_box_world[:3], torch.tensor([1.0], device=device)])
+            trailer_center_local = (T_truck_from_world @ trailer_center_world_homo)[:3]
+            boundary_x_local = trailer_center_local[0] + trailer_box_world[4] / 2.0
+
+            cab_len = l / 2.0 - boundary_x_local
+            cab_height = h - hitch_height
+            dims_cab = torch.tensor([cab_len, w, cab_height], device=device)
+
+            # Calculate the BOTTOM center of the cab in the truck's local frame
+            center_x_cab_local = boundary_x_local + cab_len / 2.0
+            center_y_cab_local = 0.0
+            # The bottom of the cab is at the hitch height plane.
+            z_bottom_cab_local = (-h / 2.0) + hitch_height
+
+            # Transform this local bottom center point back to the rotated world frame
+            bottom_center_cab_local_homo = torch.tensor(
+                [center_x_cab_local, center_y_cab_local, z_bottom_cab_local, 1.0],
+                device=device)
+            bottom_center_cab_world = (T_world_from_truck @ bottom_center_cab_local_homo)[:3]
+
+            box_cab_def = torch.cat([
+                bottom_center_cab_world, dims_cab, yaw.unsqueeze(0)
+            ]).unsqueeze(0)
+
+            points_b = points_to_process_gpu.unsqueeze(0)
+
+            in_chassis_indices = points_in_boxes_all(points_b, box_chassis_def.unsqueeze(0))
+            in_chassis_mask = in_chassis_indices.squeeze(0).squeeze(-1).bool()
+
+            in_cab_indices = points_in_boxes_all(points_b, box_cab_def.unsqueeze(0))
+
+            in_cab_mask = in_cab_indices.squeeze(0).squeeze(-1).bool()
+
+            # --- 4. Combine Results ---
+            is_truck_point = in_chassis_mask | in_cab_mask
+
+            other_class = ID_TRAILER if ID_TRAILER in overlapping_classes else ID_FORKLIFT
+            final_labels_for_group = torch.where(is_truck_point, ID_TRUCK, other_class)
+
+            new_labels_gpu[point_indices_gpu] = final_labels_for_group.long()
+
+
+        elif is_truck_trailer_case:
+            truck_idx = next(b_idx for b_idx in box_indices_tuple if box_cls_labels[b_idx] == ID_TRUCK)
+
+            truck_box_world = boxes_gpu[truck_idx]
+            cx, cy, cz, w, l, h, yaw = truck_box_world
+
+            dims_chassis = torch.tensor([l, w, hitch_height], device=device)
             z_bottom_chassis = cz - h / 2.0
             bottom_center_chassis = torch.tensor([cx, cy, z_bottom_chassis], device=device)
 
@@ -556,21 +679,14 @@ def assign_label_by_dual_obb_check(
             ]).unsqueeze(0)
 
             #print(box_chassis_def)
-
-            # --- 2. Define the Cab Box (using BOTTOM CENTER) ---
             T_world_from_truck = transform_matrix_pytorch(truck_box_world[:3], torch_quat_from_yaw(yaw))
             T_truck_from_world = torch.linalg.inv(T_world_from_truck)
 
-            boundary_x_local = -l / 2.0
-            if ID_TRAILER in overlapping_classes:
-                try:
-                    trailer_g_idx = next(b_idx for b_idx in box_indices_tuple if box_cls_labels[b_idx] == ID_TRAILER)
-                    trailer_box_world = boxes_gpu[trailer_g_idx]
-                    trailer_center_world_homo = torch.cat([trailer_box_world[:3], torch.tensor([1.0], device=device)])
-                    trailer_center_local = (T_truck_from_world @ trailer_center_world_homo)[:3]
-                    boundary_x_local = trailer_center_local[0] + trailer_box_world[4] / 2.0
-                except StopIteration:
-                    pass
+            trailer_idx = next(b_idx for b_idx in box_indices_tuple if box_cls_labels[b_idx] == ID_TRAILER)
+            trailer_box_world = boxes_gpu[trailer_idx]
+            trailer_center_world_homo = torch.cat([trailer_box_world[:3], torch.tensor([1.0], device=device)])
+            trailer_center_local = (T_truck_from_world @ trailer_center_world_homo)[:3]
+            boundary_x_local = trailer_center_local[0] + trailer_box_world[4] / 2.0
 
             cab_len = l / 2.0 - boundary_x_local
             cab_height = h - hitch_height
@@ -648,8 +764,75 @@ def assign_label_by_dual_obb_check(
     
             visualize_pointcloud_bbox(pts_classed, boxes=viz_boxes)"""
 
-
             new_labels_gpu[point_indices_gpu] = final_labels_for_group.long()
+
+        elif is_truck_forklift_case:
+            print(f">>> Path Taken: 2-Way Truck-Forklift Rule")
+            truck_idx = next(b_idx for b_idx in box_indices_tuple if box_cls_labels[b_idx] == ID_TRUCK)
+
+            if truck_idx in truck_to_trailer_map:
+                trailer_idx = truck_to_trailer_map[truck_idx]
+
+                truck_box_world = boxes_gpu[truck_idx]
+                cx, cy, cz, w, l, h, yaw = truck_box_world
+
+                dims_chassis = torch.tensor([l, w, hitch_height], device=device)
+                z_bottom_chassis = cz - h / 2.0
+                bottom_center_chassis = torch.tensor([cx, cy, z_bottom_chassis], device=device)
+
+                box_chassis_def = torch.cat([
+                    bottom_center_chassis, dims_chassis, yaw.unsqueeze(0)
+                ]).unsqueeze(0)
+
+                # print(box_chassis_def)
+                T_world_from_truck = transform_matrix_pytorch(truck_box_world[:3], torch_quat_from_yaw(yaw))
+                T_truck_from_world = torch.linalg.inv(T_world_from_truck)
+
+                trailer_box_world = boxes_gpu[trailer_idx]
+                trailer_center_world_homo = torch.cat([trailer_box_world[:3], torch.tensor([1.0], device=device)])
+                trailer_center_local = (T_truck_from_world @ trailer_center_world_homo)[:3]
+                boundary_x_local = trailer_center_local[0] + trailer_box_world[4] / 2.0
+
+                cab_len = l / 2.0 - boundary_x_local
+                cab_height = h - hitch_height
+                dims_cab = torch.tensor([cab_len, w, cab_height], device=device)
+
+                # Calculate the BOTTOM center of the cab in the truck's local frame
+                center_x_cab_local = boundary_x_local + cab_len / 2.0
+                center_y_cab_local = 0.0
+                # The bottom of the cab is at the hitch height plane.
+                z_bottom_cab_local = (-h / 2.0) + hitch_height
+
+                # Transform this local bottom center point back to the rotated world frame
+                bottom_center_cab_local_homo = torch.tensor(
+                    [center_x_cab_local, center_y_cab_local, z_bottom_cab_local, 1.0],
+                    device=device)
+                bottom_center_cab_world = (T_world_from_truck @ bottom_center_cab_local_homo)[:3]
+
+                box_cab_def = torch.cat([
+                    bottom_center_cab_world, dims_cab, yaw.unsqueeze(0)
+                ]).unsqueeze(0)
+
+                points_b = points_to_process_gpu.unsqueeze(0)
+
+                in_chassis_indices = points_in_boxes_all(points_b, box_chassis_def.unsqueeze(0))
+                in_chassis_mask = in_chassis_indices.squeeze(0).squeeze(-1).bool()
+
+                in_cab_indices = points_in_boxes_all(points_b, box_cab_def.unsqueeze(0))
+
+                in_cab_mask = in_cab_indices.squeeze(0).squeeze(-1).bool()
+
+                # --- 4. Combine Results ---
+                is_truck_point = in_chassis_mask | in_cab_mask
+
+                final_labels_for_group = torch.where(is_truck_point, ID_TRUCK, ID_FORKLIFT)
+
+                new_labels_gpu[point_indices_gpu] = final_labels_for_group.long()
+
+            else:
+                # Fallback if no trailer is paired: truck wins ambiguity
+                new_labels_gpu[point_indices_gpu] = ID_TRUCK
+            continue
 
         else:
             point_indices_gpu = torch.tensor(point_indices, device=device, dtype=torch.long)
