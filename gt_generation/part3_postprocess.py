@@ -140,8 +140,9 @@ def main(args):
     TRAILER_ID = category_name_to_learning_id.get('vehicle.trailer', 9)
     CAR_ID = category_name_to_learning_id.get('vehicle.car', 4)
     OTHER_VEHICLE_ID = category_name_to_learning_id.get('vehicle.other', 13)
+    PEDESTRIAN_ID = category_name_to_learning_id.get('human.pedestrian.adult', 13)
 
-    print(f"TRUCK_ID: {TRUCK_ID}, TRAILER_ID: {TRAILER_ID}, CAR_ID: {CAR_ID}, OTHER_VEHICLE_ID: {OTHER_VEHICLE_ID}")
+    print(f"TRUCK_ID: {TRUCK_ID}, TRAILER_ID: {TRAILER_ID}, CAR_ID: {CAR_ID}, OTHER_VEHICLE_ID: {OTHER_VEHICLE_ID}, PEDESTRIAN_ID: {PEDESTRIAN_ID}")
 
     ########################## Specify thresholds for later aggregation based on overlap #########################
 
@@ -579,8 +580,9 @@ def main(args):
                     ID_TRAILER=TRAILER_ID,
                     ID_TRUCK=TRUCK_ID,
                     ID_FORKLIFT=OTHER_VEHICLE_ID,
+                    ID_PEDESTRIAN=PEDESTRIAN_ID,
                     device=device,
-                    high_overlap_threshold=0.85
+                    high_overlap_threshold=0.80
                 )
 
                 # --- Step 4: Update the labels within our semantic dynamic points array ---

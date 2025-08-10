@@ -502,6 +502,7 @@ def assign_label_by_dual_obb_check(
         ID_TRAILER: int,
         ID_TRUCK: int,
         ID_FORKLIFT: int,
+        ID_PEDESTRIAN: int,
         device: torch.device,
         high_overlap_threshold: float = 0.85,
         hitch_height: float = 1.25,
@@ -654,7 +655,77 @@ def assign_label_by_dual_obb_check(
             point_indices_gpu = torch.tensor(point_indices, device=device, dtype=torch.long)
             points_to_process_gpu = points_gpu[point_indices_gpu, :3]  # We only need XYZ for this logic
 
-            # --- Logic for 2-way overlaps ---
+            is_pedestrian_case = ID_PEDESTRIAN in overlapping_classes and len(box_indices_tuple) == 2
+
+            if is_pedestrian_case:
+                # Get indices and classes for the pedestrian and the other object
+                try:
+                    ped_g_idx = next(b_idx for b_idx in box_indices_tuple if box_cls_labels[b_idx] == ID_PEDESTRIAN)
+                    other_g_idx = next(b_idx for b_idx in box_indices_tuple if b_idx != ped_g_idx)
+                except StopIteration:
+                    # This should not happen if is_pedestrian_case is true, but as a safeguard:
+                    continue
+
+                other_cls = box_cls_labels[other_g_idx]
+
+                # Check the overlap ratio first
+                ped_box_np = boxes_iou[ped_g_idx:ped_g_idx + 1]
+                other_box_np = boxes_iou[other_g_idx:other_g_idx + 1]
+                overlap_ratio = calculate_3d_overlap_ratio_pytorch3d(ped_box_np, other_box_np)[0, 0]
+
+                if overlap_ratio > high_overlap_threshold:
+                    print(f">>> Path Taken: Advanced Pedestrian Rule for boxes {ped_g_idx} and {other_g_idx}")
+
+                    # 1. Create a "core" pedestrian box with 40% width/length
+                    ped_box_params = boxes_gpu[ped_g_idx]
+                    cx, cy, cz, w, l, h, yaw = ped_box_params
+                    core_w, core_l = w * 0.4, l * 0.4
+
+                    # Create the core box definition (using bottom center for points_in_boxes_all)
+                    z_bottom_core = cz - h / 2.0
+                    bottom_center_core = torch.tensor([cx, cy, z_bottom_core], device=device)
+                    dims_core = torch.tensor([core_l, core_w, h], device=device)  # l, w, h format
+                    core_ped_box_def = torch.cat([bottom_center_core, dims_core, yaw.unsqueeze(0)]).unsqueeze(0)
+
+                    # 2. Check which ambiguous points fall inside this core box
+                    points_b = points_to_process_gpu.unsqueeze(0)
+                    in_core_mask = points_in_boxes_all(points_b, core_ped_box_def.unsqueeze(0)).squeeze().bool()
+
+                    # 3. Label points INSIDE the core box as pedestrian
+                    inside_indices = point_indices_gpu[in_core_mask]
+                    new_labels_gpu[inside_indices] = ID_PEDESTRIAN
+
+                    # 4. Handle points OUTSIDE the core box with a distance check
+                    outside_mask = ~in_core_mask
+                    outside_indices = point_indices_gpu[outside_mask]
+
+                    # Proceed only if there are points left to process
+                    if outside_indices.shape[0] > 0:
+                        outside_points_xyz = points_to_process_gpu[outside_mask, :3]
+
+                        # Cluster 1: Points inside the pedestrian core
+                        inside_points_xyz = points_to_process_gpu[in_core_mask, :3]
+
+                        # Cluster 2: "Clean" points of the other object
+                        mask_in_other = dyn_points_in_boxes[:, other_g_idx].bool()
+                        mask_in_ped = dyn_points_in_boxes[:, ped_g_idx].bool()
+                        mask_clean_other = mask_in_other & ~mask_in_ped
+                        clean_points_other_xyz = points_gpu[mask_clean_other, :3]
+
+                        # Resolve based on distance to the two new clusters
+                        is_closer_to_ped_core = resolve_overlap_by_distance_gpu_batched(
+                            outside_points_xyz,
+                            inside_points_xyz,
+                            clean_points_other_xyz
+                        )
+                        winner_labels = torch.where(is_closer_to_ped_core, ID_PEDESTRIAN, other_cls)
+                        new_labels_gpu[outside_indices] = winner_labels
+
+                    # Skip to the next group as this one is fully handled
+                    continue
+
+
+                    # --- Logic for 2-way overlaps ---
             if len(box_indices_tuple) == 2:
                 b_idx1, b_idx2 = box_indices_tuple
                 cls1, cls2 = box_cls_labels[b_idx1], box_cls_labels[b_idx2]
