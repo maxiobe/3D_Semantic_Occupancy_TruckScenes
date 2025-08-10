@@ -255,7 +255,7 @@ def assign_label_by_L_shape(
                         new_labels[pi] = ID_FORKLIFT
                         changed_ids += 1
 
-        """# --- Priority 2: Your New Two-Stage General Logic ---
+        # --- Priority 2: Your New Two-Stage General Logic ---
         elif len(overlapping_box_indices) == 2:
             box1_idx, box2_idx = overlapping_box_indices
             box1_params = boxes_iou[box1_idx:box1_idx + 1]
@@ -308,7 +308,7 @@ def assign_label_by_L_shape(
                     smallest_vol = vol
                     winner_idx = box_idx
             if winner_idx != -1:
-                new_labels[pi] = box_cls_labels[winner_idx]"""
+                new_labels[pi] = box_cls_labels[winner_idx]
 
         # Record if the final label is different from the initial one
         if new_labels[pi] != original_label:
@@ -374,18 +374,136 @@ def transform_matrix_pytorch(translation: torch.Tensor, quaternion: torch.Tensor
     T[:3, 3] = translation
     return T
 
+def resolve_overlap_by_distance_gpu(
+        ambiguous_points_xyz: torch.Tensor,
+        clean_points_1_xyz: torch.Tensor,
+        clean_points_2_xyz: torch.Tensor
+) -> torch.Tensor:
+    """
+    Resolves ambiguity by assigning each point to the class of the nearest "clean" cluster.
+    Runs entirely on the GPU.
+
+    Returns:
+        A boolean tensor where True means the point is closer to cluster 1.
+    """
+    # Handle edge cases where one cluster might be empty (e.g., full containment)
+    if clean_points_1_xyz.shape[0] == 0 and clean_points_2_xyz.shape[0] == 0:
+        # No clean points for either, cannot make a decision. Default to False (closer to 2).
+        return torch.zeros(ambiguous_points_xyz.shape[0], dtype=torch.bool, device=ambiguous_points_xyz.device)
+    if clean_points_1_xyz.shape[0] == 0:
+        # Only cluster 2 has clean points, so all ambiguous points are closer to 2.
+        return torch.zeros(ambiguous_points_xyz.shape[0], dtype=torch.bool, device=ambiguous_points_xyz.device)
+    if clean_points_2_xyz.shape[0] == 0:
+        # Only cluster 1 has clean points.
+        return torch.ones(ambiguous_points_xyz.shape[0], dtype=torch.bool, device=ambiguous_points_xyz.device)
+
+    # Calculate all-to-all distances from ambiguous points to clean points
+    dist_to_c1 = torch.cdist(ambiguous_points_xyz, clean_points_1_xyz)
+    dist_to_c2 = torch.cdist(ambiguous_points_xyz, clean_points_2_xyz)
+
+    # Find the minimum distance from each ambiguous point to each cluster
+    min_dist_to_c1 = torch.min(dist_to_c1, dim=1).values
+    min_dist_to_c2 = torch.min(dist_to_c2, dim=1).values
+
+    del dist_to_c1, dist_to_c2
+
+    # Return a boolean tensor indicating which cluster was closer for each point
+    return min_dist_to_c1 < min_dist_to_c2
+
+def visualize_combined_clusters(ambiguous_pts: torch.Tensor,
+                                  clean_pts_1: torch.Tensor,
+                                  clean_pts_2: torch.Tensor,
+                                  title="Cluster Visualization"):
+    """
+    Combines and visualizes ambiguous and clean point cloud clusters.
+
+    Args:
+        ambiguous_pts (torch.Tensor): The ambiguous points.
+        clean_pts_1 (torch.Tensor): The first set of clean points.
+        clean_pts_2 (torch.Tensor): The second set of clean points.
+        title (str): The window title for the visualization.
+    """
+    # 1. Convert all tensors to NumPy arrays on the CPU
+    ambiguous_np = ambiguous_pts.cpu().numpy()
+    clean_1_np = clean_pts_1.cpu().numpy()
+    clean_2_np = clean_pts_2.cpu().numpy()
+
+    # 2. Assign a unique label to each cluster (0, 1, 2)
+    # This creates a new column for each point cloud.
+    ambiguous_labeled = np.hstack([ambiguous_np, np.full((ambiguous_np.shape[0], 1), 0)])
+    clean_1_labeled = np.hstack([clean_1_np, np.full((clean_1_np.shape[0], 1), 1)])
+    clean_2_labeled = np.hstack([clean_2_np, np.full((clean_2_np.shape[0], 1), 2)])
+
+    # 3. Stack all three labeled arrays into a single point cloud
+    combined_cloud = np.vstack([ambiguous_labeled, clean_1_labeled, clean_2_labeled])
+
+    # 4. Call your existing visualizer
+    # It will automatically use the 4th column (our new label) for coloring.
+    visualize_pointcloud(combined_cloud, title=title)
+
+def resolve_overlap_by_distance_gpu_batched(
+        ambiguous_points_xyz: torch.Tensor,
+        clean_points_1_xyz: torch.Tensor,
+        clean_points_2_xyz: torch.Tensor,
+        batch_size: int = 4096 # Process 4096 ambiguous points at a time
+) -> torch.Tensor:
+    """
+    Resolves ambiguity by distance to nearest "clean" cluster, using BATCHING to conserve memory.
+    """
+    # Handle edge cases where one cluster might be empty
+    if clean_points_1_xyz.shape[0] == 0:
+        return torch.zeros(ambiguous_points_xyz.shape[0], dtype=torch.bool, device=ambiguous_points_xyz.device)
+    if clean_points_2_xyz.shape[0] == 0:
+        return torch.ones(ambiguous_points_xyz.shape[0], dtype=torch.bool, device=ambiguous_points_xyz.device)
+
+    print(f"Clean 1: {clean_points_1_xyz.shape}, Clean 2: {clean_points_2_xyz.shape}")
+    print(f"Ambigious points: {ambiguous_points_xyz.shape}")
+
+    """visualize_combined_clusters(
+        ambiguous_points_xyz,
+        clean_points_1_xyz,
+        clean_points_2_xyz,
+        title="Ambiguous (Red) vs Clean Clusters (Green/Blue)"
+    )
+    visualize_pointcloud(clean_points_1_xyz.cpu().numpy())
+    visualize_pointcloud(clean_points_2_xyz.cpu().numpy())
+    visualize_pointcloud(ambiguous_points_xyz.cpu().numpy())"""
+
+    num_ambiguous = ambiguous_points_xyz.shape[0]
+    min_dists_c1 = torch.full((num_ambiguous,), float('inf'), device=ambiguous_points_xyz.device)
+    min_dists_c2 = torch.full((num_ambiguous,), float('inf'), device=ambiguous_points_xyz.device)
+
+    # Process ambiguous points in batches to prevent OOM errors
+    for i in range(0, num_ambiguous, batch_size):
+        batch_end = min(i + batch_size, num_ambiguous)
+        batch_points = ambiguous_points_xyz[i:batch_end]
+
+        # Calculate distance for the current batch
+        dist_to_c1_batch = torch.cdist(batch_points, clean_points_1_xyz)
+        dist_to_c2_batch = torch.cdist(batch_points, clean_points_2_xyz)
+
+        # Find the minimum distance for each point in the batch and store it
+        min_dists_c1[i:batch_end] = torch.min(dist_to_c1_batch, dim=1).values
+        min_dists_c2[i:batch_end] = torch.min(dist_to_c2_batch, dim=1).values
+
+    # Compare the final minimum distances for all points
+    return min_dists_c1 < min_dists_c2
+
 
 def assign_label_by_dual_obb_check(
         overlap_idxs: np.ndarray,
         pt_to_box_map: Dict[int, List[int]],
         points: np.ndarray,
         boxes: np.ndarray,
+        boxes_iou: np.ndarray,
+        dyn_points_in_boxes: torch.Tensor,
         box_cls_labels: np.ndarray,
         pt_labels: np.ndarray,
         ID_TRAILER: int,
         ID_TRUCK: int,
         ID_FORKLIFT: int,
         device: torch.device,
+        high_overlap_threshold: float = 0.85,
         hitch_height: float = 1.25,
 ) -> Tuple[np.ndarray, List[int]]:
     """
@@ -411,125 +529,260 @@ def assign_label_by_dual_obb_check(
     for box_indices_tuple, point_indices in tqdm(groups.items(), desc="Processing overlap groups"):
 
         overlapping_classes = {box_cls_labels[b_idx] for b_idx in box_indices_tuple}
-        if ID_TRUCK not in overlapping_classes:
-            continue
+        is_truck_trailer_case = {ID_TRUCK, ID_TRAILER}.issubset(overlapping_classes)
+        is_truck_forklift_case = {ID_TRUCK, ID_FORKLIFT}.issubset(overlapping_classes)
 
-        point_indices_gpu = torch.tensor(point_indices, device=device, dtype=torch.long)
-        points_to_process_gpu = points_gpu[point_indices_gpu]
+        if is_truck_trailer_case or is_truck_forklift_case:
+            point_indices_gpu = torch.tensor(point_indices, device=device, dtype=torch.long)
+            points_to_process_gpu = points_gpu[point_indices_gpu]
 
-        try:
-            truck_g_idx = next(b_idx for b_idx in box_indices_tuple if box_cls_labels[b_idx] == ID_TRUCK)
-        except StopIteration:
-            continue
-
-        truck_box_world = boxes_gpu[truck_g_idx]
-        cx, cy, cz, w, l, h, yaw = truck_box_world
-
-        # --- 1. Define the Chassis Box (using BOTTOM CENTER) ---
-        dims_chassis = torch.tensor([l, w, hitch_height], device=device)
-        # The bottom of the truck is at z = cz - h / 2.0. This is the correct Z for mmcv.
-        z_bottom_chassis = cz - h / 2.0
-        bottom_center_chassis = torch.tensor([cx, cy, z_bottom_chassis], device=device)
-
-        box_chassis_def = torch.cat([
-            bottom_center_chassis, dims_chassis, yaw.unsqueeze(0)
-        ]).unsqueeze(0)
-
-        #print(box_chassis_def)
-
-        # --- 2. Define the Cab Box (using BOTTOM CENTER) ---
-        T_world_from_truck = transform_matrix_pytorch(truck_box_world[:3], torch_quat_from_yaw(yaw))
-        T_truck_from_world = torch.linalg.inv(T_world_from_truck)
-
-        boundary_x_local = -l / 2.0
-        if ID_TRAILER in overlapping_classes:
             try:
-                trailer_g_idx = next(b_idx for b_idx in box_indices_tuple if box_cls_labels[b_idx] == ID_TRAILER)
-                trailer_box_world = boxes_gpu[trailer_g_idx]
-                trailer_center_world_homo = torch.cat([trailer_box_world[:3], torch.tensor([1.0], device=device)])
-                trailer_center_local = (T_truck_from_world @ trailer_center_world_homo)[:3]
-                boundary_x_local = trailer_center_local[0] + trailer_box_world[4] / 2.0
+                truck_g_idx = next(b_idx for b_idx in box_indices_tuple if box_cls_labels[b_idx] == ID_TRUCK)
             except StopIteration:
-                pass
+                continue
 
-        cab_len = l / 2.0 - boundary_x_local
-        cab_height = h - hitch_height
-        dims_cab = torch.tensor([cab_len, w, cab_height], device=device)
+            truck_box_world = boxes_gpu[truck_g_idx]
+            cx, cy, cz, w, l, h, yaw = truck_box_world
 
-        # Calculate the BOTTOM center of the cab in the truck's local frame
-        center_x_cab_local = boundary_x_local + cab_len / 2.0
-        center_y_cab_local = 0.0
-        # The bottom of the cab is at the hitch height plane.
-        z_bottom_cab_local = (-h / 2.0) + hitch_height
+            # --- 1. Define the Chassis Box (using BOTTOM CENTER) ---
+            dims_chassis = torch.tensor([l, w, hitch_height], device=device)
+            # The bottom of the truck is at z = cz - h / 2.0. This is the correct Z for mmcv.
+            z_bottom_chassis = cz - h / 2.0
+            bottom_center_chassis = torch.tensor([cx, cy, z_bottom_chassis], device=device)
 
-        # Transform this local bottom center point back to the rotated world frame
-        bottom_center_cab_local_homo = torch.tensor([center_x_cab_local, center_y_cab_local, z_bottom_cab_local, 1.0],
-                                                    device=device)
-        bottom_center_cab_world = (T_world_from_truck @ bottom_center_cab_local_homo)[:3]
+            box_chassis_def = torch.cat([
+                bottom_center_chassis, dims_chassis, yaw.unsqueeze(0)
+            ]).unsqueeze(0)
 
-        box_cab_def = torch.cat([
-            bottom_center_cab_world, dims_cab, yaw.unsqueeze(0)
-        ]).unsqueeze(0)
+            #print(box_chassis_def)
 
-        #print(box_cab_def)
+            # --- 2. Define the Cab Box (using BOTTOM CENTER) ---
+            T_world_from_truck = transform_matrix_pytorch(truck_box_world[:3], torch_quat_from_yaw(yaw))
+            T_truck_from_world = torch.linalg.inv(T_world_from_truck)
 
-        # --- 3. Run points_in_boxes for each box ---
-        points_b = points_to_process_gpu.unsqueeze(0)
+            boundary_x_local = -l / 2.0
+            if ID_TRAILER in overlapping_classes:
+                try:
+                    trailer_g_idx = next(b_idx for b_idx in box_indices_tuple if box_cls_labels[b_idx] == ID_TRAILER)
+                    trailer_box_world = boxes_gpu[trailer_g_idx]
+                    trailer_center_world_homo = torch.cat([trailer_box_world[:3], torch.tensor([1.0], device=device)])
+                    trailer_center_local = (T_truck_from_world @ trailer_center_world_homo)[:3]
+                    boundary_x_local = trailer_center_local[0] + trailer_box_world[4] / 2.0
+                except StopIteration:
+                    pass
 
-        #pts_np = points_b.squeeze(0).cpu().numpy().astype(np.float64)
-        #visualize_pointcloud(pts_np)
+            cab_len = l / 2.0 - boundary_x_local
+            cab_height = h - hitch_height
+            dims_cab = torch.tensor([cab_len, w, cab_height], device=device)
 
-        in_chassis_indices = points_in_boxes_all(points_b, box_chassis_def.unsqueeze(0))
-        in_chassis_mask = in_chassis_indices.squeeze(0).squeeze(-1).bool()
+            # Calculate the BOTTOM center of the cab in the truck's local frame
+            center_x_cab_local = boundary_x_local + cab_len / 2.0
+            center_y_cab_local = 0.0
+            # The bottom of the cab is at the hitch height plane.
+            z_bottom_cab_local = (-h / 2.0) + hitch_height
 
-        in_cab_indices = points_in_boxes_all(points_b, box_cab_def.unsqueeze(0))
+            # Transform this local bottom center point back to the rotated world frame
+            bottom_center_cab_local_homo = torch.tensor([center_x_cab_local, center_y_cab_local, z_bottom_cab_local, 1.0],
+                                                        device=device)
+            bottom_center_cab_world = (T_world_from_truck @ bottom_center_cab_local_homo)[:3]
 
-        in_cab_mask = in_cab_indices.squeeze(0).squeeze(-1).bool()
+            box_cab_def = torch.cat([
+                bottom_center_cab_world, dims_cab, yaw.unsqueeze(0)
+            ]).unsqueeze(0)
 
-        # --- 4. Combine Results ---
-        is_truck_point = in_chassis_mask | in_cab_mask
+            #print(box_cab_def)
 
-        other_class = ID_TRAILER if ID_TRAILER in overlapping_classes else ID_FORKLIFT
-        final_labels_for_group = torch.where(is_truck_point, ID_TRUCK, other_class)
+            # --- 3. Run points_in_boxes for each box ---
+            points_b = points_to_process_gpu.unsqueeze(0)
 
-        """labels_np = final_labels_for_group.cpu().numpy().reshape(-1, 1)
-        pts_classed = np.hstack((pts_np, labels_np))
-        visualize_pointcloud(pts_classed)
-        print(pts_classed)
+            #pts_np = points_b.squeeze(0).cpu().numpy().astype(np.float64)
+            #visualize_pointcloud(pts_np)
 
-        box_defs_np = [
-            box_chassis_def.squeeze(0).cpu().numpy(),
-            box_cab_def.squeeze(0).cpu().numpy()
-        ]
+            in_chassis_indices = points_in_boxes_all(points_b, box_chassis_def.unsqueeze(0))
+            in_chassis_mask = in_chassis_indices.squeeze(0).squeeze(-1).bool()
 
-        viz_boxes = []
-        for box_def in box_defs_np:
-            bottom_center = box_def[:3]
-            # Dims are [width, length, height] which corresponds to the 'wlh' attribute
-            dims = box_def[3:6]
-            h = dims[2]
-            yaw = box_def[6] - np.pi / 2.0
+            in_cab_indices = points_in_boxes_all(points_b, box_cab_def.unsqueeze(0))
 
-            # 1. Calculate the geometric center (same as before)
-            geometric_center = bottom_center + np.array([0, 0, h / 2.0])
+            in_cab_mask = in_cab_indices.squeeze(0).squeeze(-1).bool()
 
-            # 2. Create a Quaternion from the yaw angle
-            # This represents a rotation around the Z-axis.
-            orientation = Quaternion(axis=[0, 0, 1], angle=yaw)
+            # --- 4. Combine Results ---
+            is_truck_point = in_chassis_mask | in_cab_mask
 
-            # 3. Instantiate the truckscenes/nuscenes Box object
-            # This object will have the .wlh attribute that your function needs.
-            ts_box = Box(
-                center=geometric_center,
-                size=dims,  # [w, l, h]
-                orientation=orientation
-            )
-            viz_boxes.append(ts_box)
+            other_class = ID_TRAILER if ID_TRAILER in overlapping_classes else ID_FORKLIFT
+            final_labels_for_group = torch.where(is_truck_point, ID_TRUCK, other_class)
 
-        visualize_pointcloud_bbox(pts_classed, boxes=viz_boxes)"""
+            """labels_np = final_labels_for_group.cpu().numpy().reshape(-1, 1)
+            pts_classed = np.hstack((pts_np, labels_np))
+            visualize_pointcloud(pts_classed)
+            print(pts_classed)
+    
+            box_defs_np = [
+                box_chassis_def.squeeze(0).cpu().numpy(),
+                box_cab_def.squeeze(0).cpu().numpy()
+            ]
+    
+            viz_boxes = []
+            for box_def in box_defs_np:
+                bottom_center = box_def[:3]
+                # Dims are [width, length, height] which corresponds to the 'wlh' attribute
+                dims = box_def[3:6]
+                h = dims[2]
+                yaw = box_def[6] - np.pi / 2.0
+    
+                # 1. Calculate the geometric center (same as before)
+                geometric_center = bottom_center + np.array([0, 0, h / 2.0])
+    
+                # 2. Create a Quaternion from the yaw angle
+                # This represents a rotation around the Z-axis.
+                orientation = Quaternion(axis=[0, 0, 1], angle=yaw)
+    
+                # 3. Instantiate the truckscenes/nuscenes Box object
+                # This object will have the .wlh attribute that your function needs.
+                ts_box = Box(
+                    center=geometric_center,
+                    size=dims,  # [w, l, h]
+                    orientation=orientation
+                )
+                viz_boxes.append(ts_box)
+    
+            visualize_pointcloud_bbox(pts_classed, boxes=viz_boxes)"""
 
 
-        new_labels_gpu[point_indices_gpu] = final_labels_for_group.long()
+            new_labels_gpu[point_indices_gpu] = final_labels_for_group.long()
+
+        else:
+            point_indices_gpu = torch.tensor(point_indices, device=device, dtype=torch.long)
+            points_to_process_gpu = points_gpu[point_indices_gpu, :3]  # We only need XYZ for this logic
+
+            # --- Logic for 2-way overlaps ---
+            if len(box_indices_tuple) == 2:
+                b_idx1, b_idx2 = box_indices_tuple
+                cls1, cls2 = box_cls_labels[b_idx1], box_cls_labels[b_idx2]
+
+                #print(f"\n--- Debugging Group: Boxes {b_idx1}(cls {cls1}) vs {b_idx2}(cls {cls2}) ---")
+
+                box1_params_np = boxes_iou[b_idx1:b_idx1 + 1]
+                box2_params_np = boxes_iou[b_idx2:b_idx2 + 1]
+
+                # Call the function with the expected NumPy array inputs.
+                overlap_ratio = calculate_3d_overlap_ratio_pytorch3d(box1_params_np, box2_params_np)[0, 0]
+                print(f"Calculated Overlap Ratio: {overlap_ratio:.4f} | Threshold: {high_overlap_threshold}")
+
+                # --- STAGE 2.1: High Overlap -> Assign to smaller volume box ---
+                if overlap_ratio > high_overlap_threshold:
+                    print(">>> Path Taken: High Overlap (Smaller Volume Rule)")
+                    box1 = boxes_gpu[b_idx1]
+                    box2 = boxes_gpu[b_idx2]
+                    vol1 = torch.prod(box1[3:6])
+                    vol2 = torch.prod(box2[3:6])
+                    print(f"Box {b_idx1} Volume: {vol1.item():.2f} | Box {b_idx2} Volume: {vol2.item():.2f}")
+                    winner_cls = cls1 if vol1 < vol2 else cls2
+                    new_labels_gpu[point_indices_gpu] = winner_cls  # Assign all points to the same winner
+
+                # --- STAGE 2.2: Low Overlap -> Assign based on distance to clean clusters ---
+                else:
+                    print(">>> Path Taken: Low Overlap (Distance to Clean Clusters Rule)")
+                    # Find "clean" points using boolean masks on the GPU
+                    dyn_mask = dyn_points_in_boxes.bool()
+
+                    #print(dyn_mask.shape)
+
+                    nb0, nb1 = dyn_mask.shape
+                    num_points = points_gpu.shape[0]
+
+                    if nb0 == num_points:
+                        # dyn_mask is (num_points, num_boxes)
+                        mask_in_box1 = dyn_mask[:, b_idx1]
+                        mask_in_box2 = dyn_mask[:, b_idx2]
+                    elif nb1 == num_points:
+                        # dyn_mask is (num_boxes, num_points) --> transpose indexing
+                        mask_in_box1 = dyn_mask[b_idx1, :]
+                        mask_in_box2 = dyn_mask[b_idx2, :]
+                    else:
+                        raise RuntimeError(
+                            f"Unexpected dyn_points_in_boxes shape: {dyn_mask.shape} for {num_points} points")
+
+                    total_points = dyn_points_in_boxes.shape[0]
+                    print(f"Points 'in' box {b_idx1}: {torch.sum(mask_in_box1).item()} / {total_points}")
+                    print(f"Points 'in' box {b_idx2}: {torch.sum(mask_in_box2).item()} / {total_points}")
+
+                    mask_clean_box1 = mask_in_box1 & ~mask_in_box2
+                    mask_clean_box2 = mask_in_box2 & ~mask_in_box1
+
+                    clean_points_1_xyz = points_gpu[mask_clean_box1, :3]
+                    clean_points_2_xyz = points_gpu[mask_clean_box2, :3]
+
+                    """print(f"Shape of clean_points_1_xyz: {clean_points_1_xyz.shape}")
+                    if clean_points_1_xyz.shape[0] > 0:
+                        print("First 5 points of clean_points_1_xyz:")
+                        # Print the first 5 rows. The output will include tensor metadata.
+                        print(clean_points_1_xyz[:5])
+                    else:
+                        print("clean_points_1_xyz is empty.")
+
+                    # Inspect the second cloud
+                    print(f"\nShape of clean_points_2_xyz: {clean_points_2_xyz.shape}")
+                    if clean_points_2_xyz.shape[0] > 0:
+                        print("First 5 points of clean_points_2_xyz:")
+                        print(clean_points_2_xyz[:5])
+                    else:
+                        print("clean_points_2_xyz is empty.")"""
+
+                    # Use the new GPU helper function
+                    is_closer_to_1 = resolve_overlap_by_distance_gpu_batched(
+                        points_to_process_gpu,
+                        clean_points_1_xyz,
+                        clean_points_2_xyz
+                    )
+
+                    # Assign a label for each point individually based on the result
+                    winner_labels_for_group = torch.where(is_closer_to_1, cls1, cls2)
+                    new_labels_gpu[point_indices_gpu] = winner_labels_for_group
+
+            # --- Fallback for rare 3+ general overlaps ---
+            elif len(box_indices_tuple) > 2:
+                # Gather volumes for all overlapping boxes
+                dims = boxes_gpu[list(box_indices_tuple), 3:6]
+                volumes = torch.prod(dims, dim=1)
+
+                # Find the index of the smallest volume within the local group
+                smallest_vol_idx_local = torch.argmin(volumes)
+
+                # Get the global box index and class label of the winner
+                winner_g_idx = box_indices_tuple[smallest_vol_idx_local]
+                winner_cls = box_cls_labels[winner_g_idx]
+
+                new_labels_gpu[point_indices_gpu] = winner_cls
+
+            """pts_np = points_to_process_gpu.cpu().numpy()
+            final_labels_for_group_gpu = new_labels_gpu[point_indices_gpu]
+            labels_np = final_labels_for_group_gpu.cpu().numpy().reshape(-1, 1)
+            pts_classed = np.hstack((pts_np, labels_np))
+
+            viz_boxes = []
+            for b_idx in box_indices_tuple:
+                # Get the box parameters from the GPU tensor used in the logic
+                box_params = boxes_gpu[b_idx].cpu().numpy()
+                center = box_params[:3]
+                dims = box_params[3:6]  # Note: This is [w, l, h] and reflects the 1.1x width enlargement
+                yaw = box_params[6]
+
+                # Create a Quaternion for the truckscenes Box object
+                orientation = Quaternion(axis=[0, 0, 1], angle=yaw)
+
+                # Instantiate the Box object your visualizer expects
+                ts_box = Box(
+                    center=center,
+                    size=dims,
+                    orientation=orientation
+                )
+                viz_boxes.append(ts_box)
+
+            # 3. Call the visualization function
+            print(f"Visualizing group of {len(pts_classed)} points with assigned labels and {len(viz_boxes)} boxes.")
+            # This function will now show the points colored by their new labels.
+            visualize_pointcloud_bbox(pts_classed, boxes=viz_boxes)"""
+
 
     new_labels_cpu = new_labels_gpu.cpu().numpy()
     reassigned_indices = torch.where(original_labels_gpu != new_labels_gpu)[0].cpu().numpy().tolist()
