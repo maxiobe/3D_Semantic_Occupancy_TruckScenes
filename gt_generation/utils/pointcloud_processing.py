@@ -3,6 +3,7 @@ import numpy as np
 from typing import Any, Dict, List, Optional, Union, Tuple
 from copy import deepcopy
 from scipy.spatial.transform import Rotation
+from collections import defaultdict
 
 # Function to perform poisson surface reconstruction on a given point cloud and returns a mesh representation of the point cloud, along with vertex info
 # Inputs pcd: input point cloud,
@@ -83,6 +84,146 @@ def preprocess(pcd, config):
         config['max_nn'],
         normals=True
     )
+
+
+def denoise_near_points_dbscan(
+        pcd: o3d.geometry.PointCloud,
+        config: dict
+) -> Tuple[o3d.geometry.PointCloud, np.ndarray]:
+    """
+    Applies a targeted DBSCAN filter only to near, non-ground points.
+    """
+    initial_indices = np.arange(len(pcd.points))
+    if len(initial_indices) < 100:  # Safety check
+        return pcd, initial_indices
+
+    # Step 1: Segment and Protect Ground Points
+    plane_model, ground_indices = pcd.segment_plane(
+        distance_threshold=config.get('ransac_dist_threshold', 0.30),
+        ransac_n=3,
+        num_iterations=100
+    )
+
+    # Step 2: Separate Non-Ground points into Near and Far
+    non_ground_indices = np.setdiff1d(initial_indices, ground_indices)
+    non_ground_pcd = pcd.select_by_index(non_ground_indices)
+    points = np.asarray(non_ground_pcd.points)
+    distances = np.linalg.norm(points, axis=1)
+    distance_threshold = config.get('ransac_filter_distance_threshold', 30.0)
+    near_mask_relative = distances < distance_threshold
+
+    near_indices_original = non_ground_indices[near_mask_relative]
+    far_indices_original = non_ground_indices[~near_mask_relative]
+    near_pcd = pcd.select_by_index(near_indices_original)
+
+    # Step 3: Aggressively Filter ONLY NEAR points with DBSCAN
+    kept_near_indices = np.array([], dtype=int)
+    if len(near_pcd.points) > 0:
+        labels = np.array(near_pcd.cluster_dbscan(
+            eps=config.get('dbscan_eps', 0.6),
+            min_points=config.get('dbscan_min_points', 15)
+        ))
+        min_cluster_size = config.get('dbscan_min_cluster_size', 25)
+        unique_labels, counts = np.unique(labels, return_counts=True)
+        significant_labels = unique_labels[(counts >= min_cluster_size) & (unique_labels != -1)]
+        dbscan_keep_mask = np.isin(labels, significant_labels)
+        kept_near_indices = near_indices_original[dbscan_keep_mask]
+
+    # Step 4: Recombine All Kept Points
+    final_kept_indices = np.union1d(ground_indices, kept_near_indices)
+    final_kept_indices = np.union1d(final_kept_indices, far_indices_original)
+
+    final_pcd = pcd.select_by_index(final_kept_indices.astype(int))
+
+    return final_pcd, final_kept_indices
+
+
+def denoise_near_points_voxel(
+        pcd: o3d.geometry.PointCloud,
+        config: dict
+) -> Tuple[o3d.geometry.PointCloud, np.ndarray]:
+    """
+    Applies a targeted VOXEL NEIGHBORHOOD filter only to near, non-ground points.
+
+    1. Segments and protects the ground using RANSAC.
+    2. Separates non-ground points into "near" and "far".
+    3. Applies the voxel neighborhood density filter only to the "near" points.
+    4. Recombines the ground, cleaned near points, and untouched far points.
+    """
+    initial_indices = np.arange(len(pcd.points))
+    if len(initial_indices) < 100:  # Safety check
+        return pcd, initial_indices
+
+    print("Applying selective near-field VOXEL filtering...")
+
+    # --- Step 1: Segment and Protect Ground Points ---
+    plane_model, ground_indices = pcd.segment_plane(
+        distance_threshold=config.get('ransac_dist_threshold', 0.4),
+        ransac_n=3,
+        num_iterations=100
+    )
+
+    # --- Step 2: Separate Non-Ground points into Near and Far ---
+    non_ground_indices = np.setdiff1d(initial_indices, ground_indices)
+    non_ground_pcd = pcd.select_by_index(non_ground_indices)
+
+    points = np.asarray(non_ground_pcd.points)
+    distances = np.linalg.norm(points, axis=1)
+    distance_threshold = config.get('ransac_filter_distance_threshold', 30.0)
+
+    near_mask_relative = distances < distance_threshold
+    near_indices_original = non_ground_indices[near_mask_relative]
+    far_indices_original = non_ground_indices[~near_mask_relative]
+
+    near_pcd = pcd.select_by_index(near_indices_original)
+
+    # --- Step 3: Filter ONLY NEAR points with Voxel Neighborhood Density ---
+    kept_near_indices = np.array([], dtype=int)
+    if len(near_pcd.points) > 0:
+        print(f"  -> Filtering {len(near_pcd.points)} near points with Voxel method...")
+
+        voxel_size = config.get('voxel_filter_size', 0.4)
+        voxel_grid = o3d.geometry.VoxelGrid.create_from_point_cloud(near_pcd, voxel_size=voxel_size)
+
+        voxels = voxel_grid.get_voxels()
+        if not voxels:  # Check if there are any voxels
+            print("  -> No voxels found in near points. Skipping voxel filter.")
+        else:
+            voxel_centers = np.array([voxel_grid.get_voxel_center_coordinate(v.grid_index) for v in voxels])
+            pcd_centers = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(voxel_centers))
+            kdtree = o3d.geometry.KDTreeFlann(pcd_centers)
+
+            search_radius = voxel_size * config.get('voxel_search_radius_multiplier', 5.0)
+            neighborhood_threshold = config.get('voxel_neighborhood_threshold', 15)
+
+            valid_voxel_indices_relative = [
+                i for i, center in enumerate(voxel_centers)
+                if len(kdtree.search_radius_vector_3d(center, search_radius)[1]) >= neighborhood_threshold
+            ]
+            valid_voxels_to_keep = {tuple(voxels[i].grid_index) for i in valid_voxel_indices_relative}
+
+            # Efficiently find points within the valid voxels
+            voxel_to_points_map = defaultdict(list)
+            for i in range(len(near_pcd.points)):
+                voxel_to_points_map[tuple(voxel_grid.get_voxel(near_pcd.points[i]))].append(i)
+
+            kept_indices_relative_to_near_pcd = [
+                idx for grid in valid_voxels_to_keep for idx in voxel_to_points_map.get(grid, [])
+            ]
+
+            # Map the relative indices from near_pcd back to the original full-cloud indices
+            kept_near_indices = near_indices_original[kept_indices_relative_to_near_pcd]
+    else:
+        print("  -> No near points to filter.")
+
+    # --- Step 4: Recombine All Kept Points ---
+    final_kept_indices = np.union1d(ground_indices, kept_near_indices)
+    final_kept_indices = np.union1d(final_kept_indices, far_indices_original)
+
+    final_pcd = pcd.select_by_index(final_kept_indices.astype(int))
+
+    print(f"Selective filtering complete. Final point count: {len(final_pcd.points)}")
+    return final_pcd, final_kept_indices
 
 
 def denoise_pointcloud(pcd: o3d.geometry.PointCloud, filter_mode: str, config: dict,

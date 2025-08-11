@@ -9,7 +9,7 @@ from truckscenes import TruckScenes
 from scipy.spatial.transform import Rotation
 from collections import defaultdict
 from utils.visualization import visualize_pointcloud, visualize_pointcloud_bbox, visualize_occupancy_o3d, calculate_and_plot_pose_errors, visualize_point_cloud_comparison
-from utils.pointcloud_processing import denoise_pointcloud
+from utils.pointcloud_processing import denoise_pointcloud, denoise_near_points_dbscan, denoise_near_points_voxel
 from truckscenes.utils.geometry_utils import transform_matrix
 from mmcv.ops.points_in_boxes import (points_in_boxes_cpu, points_in_boxes_all)
 # import chamfer
@@ -205,8 +205,8 @@ def main(args):
         #################################### Filtering based on if only keyframes should be used ###########################
         print(f"Static map aggregation: --static_map_keyframes_only is {args.static_map_keyframes_only}")
 
-        lidar_pc_list_for_concat = []
-        lidar_pc_sids_list_for_concat = []
+        lidar_pc_list_for_concat_unfiltered = []
+        lidar_pc_sids_list_for_concat_unfiltered = []
 
         for idx, frame_info in enumerate(dict_list):
             is_key = frame_info['is_key_frame']
@@ -217,10 +217,10 @@ def main(args):
             if include_in_static_map:
                 print(f"  Including frame {idx} (Keyframe: {is_key}) in static map aggregation.")
                 if idx < len(source_pc_list_all_frames) and source_pc_list_all_frames[idx].shape[0] > 0:
-                    lidar_pc_list_for_concat.append(source_pc_list_all_frames[idx])
+                    lidar_pc_list_for_concat_unfiltered.append(source_pc_list_all_frames[idx])
                     if idx < len(source_pc_sids_list_all_frames) and source_pc_sids_list_all_frames[idx].shape[
                         0] > 0:
-                        lidar_pc_sids_list_for_concat.append(source_pc_sids_list_all_frames[idx])
+                        lidar_pc_sids_list_for_concat_unfiltered.append(source_pc_sids_list_all_frames[idx])
                     elif source_pc_list_all_frames[idx].shape[
                         0] > 0:
                         print(
@@ -260,19 +260,72 @@ def main(args):
     
         visualize_pointcloud(unrefined_pc)"""
     else:
-        lidar_pc_list_for_concat = context['lidar_pc_list_for_concat']
-        lidar_pc_sids_list_for_concat = context['lidar_pc_sids_list_for_concat']
+        lidar_pc_list_for_concat_unfiltered = context['lidar_pc_list_for_concat']
+        lidar_pc_sids_list_for_concat_unfiltered = context['lidar_pc_sids_list_for_concat']
 
     if args.vis_static_frame_comparison:
         visualize_point_cloud_comparison(
-            point_cloud_list=lidar_pc_list_for_concat,
+            point_cloud_list=lidar_pc_list_for_concat_unfiltered,
             frame_indices=[1, 25],
             scene_name="Comparing static frames: (red, blue, green, yellow, cyan, magenta)"
         )
 
     ####################################### Filtering on each point cloud in the list ###############################
-    #if args.filter_static_pc_list:
-     #   pass
+    if args.filter_static_pc_list:
+        print("\n--- Applying per-frame DBSCAN filtering to the list of point clouds ---")
+        lidar_pc_list_for_concat = []
+        lidar_pc_sids_list_for_concat = []
+        for filter_idx, pc_to_filter_np in enumerate(
+                tqdm(lidar_pc_list_for_concat_unfiltered, desc="Per-frame Filtering")):
+            sids_to_filter = lidar_pc_sids_list_for_concat_unfiltered[filter_idx]
+
+            # Convert numpy array to Open3D PointCloud
+            pcd_to_filter = o3d.geometry.PointCloud()
+            pcd_to_filter.points = o3d.utility.Vector3dVector(pc_to_filter_np[:, :3])
+
+            # Call your new advanced filtering function
+            """cleaned_pcd, kept_indices = denoise_near_points_dbscan(
+                pcd_to_filter,
+                config
+            )"""
+            cleaned_pcd, kept_indices = denoise_near_points_voxel(
+                pcd_to_filter,
+                config
+            )
+
+            # Use the returned indices to filter both the points and the sensor IDs
+            cleaned_pc_np = pc_to_filter_np[kept_indices]
+            cleaned_sids = sids_to_filter[kept_indices]
+
+            # Append the cleaned results to the new lists
+            lidar_pc_list_for_concat.append(cleaned_pc_np)
+            lidar_pc_sids_list_for_concat.append(cleaned_sids)
+
+            if args.vis_filter_static_pc_list:
+                print(f"\nVisualizing filter result for frame {filter_idx}...")
+
+                # Get indices of points that were removed
+                all_indices = np.arange(len(pc_to_filter_np))
+                removed_indices = np.setdiff1d(all_indices, kept_indices)
+
+                # Create a point cloud for the points that were KEPT
+                pcd_kept = pcd_to_filter.select_by_index(kept_indices)
+                pcd_kept.paint_uniform_color([0.0, 0.8, 0.0])  # Green
+
+                # Create a point cloud for the points that were REMOVED
+                pcd_removed = pcd_to_filter.select_by_index(removed_indices)
+                pcd_removed.paint_uniform_color([1.0, 0.0, 0.0])  # Red
+
+                # Draw both point clouds together
+                o3d.visualization.draw_geometries(
+                    [pcd_kept, pcd_removed],
+                    window_name=f"Per-Frame Filter Result - Frame {filter_idx}"
+                )
+
+    else:
+        print("\n--- Skipping per-frame filtering ---")
+        lidar_pc_list_for_concat = lidar_pc_list_for_concat_unfiltered
+        lidar_pc_sids_list_for_concat = lidar_pc_sids_list_for_concat_unfiltered
 
     ###############################################################################################################
     lidar_pc_final_global = np.concatenate(lidar_pc_list_for_concat, axis=0)
@@ -294,21 +347,9 @@ def main(args):
         ground_indices_set = set(ground_indices)
         print(f"RANSAC identified {len(ground_indices_set)} ground points to protect.")
 
-        """ground_pcd = pcd_aggregated.select_by_index(ground_indices)
-
-        # Optional: Color the ground points for clarity
-        ground_pcd.paint_uniform_color([0.0, 0.8, 0.0])  # Green
-
-        # 5. Visualize ONLY the ground point cloud
-        print("Displaying ground plane points...")
-        o3d.visualization.draw_geometries(
-            [ground_pcd],
-            window_name="Detected Ground Plane Points"
-        )"""
-
         # --- Step 2: Run the Voxel Neighborhood Filter on the whole cloud ---
         print("Running Voxel Neighborhood Filter...")
-        voxel_size = 0.2
+        voxel_size = config.get("voxel_filter_size_aggregated", 0.2)
         voxel_grid = o3d.geometry.VoxelGrid.create_from_point_cloud(pcd_aggregated, voxel_size=voxel_size)
 
         # Get all occupied voxels and build a KDTree on their centers for fast search
@@ -318,8 +359,8 @@ def main(args):
         kdtree = o3d.geometry.KDTreeFlann(pcd_centers)
 
         # Find which voxels have enough neighbors
-        search_radius = voxel_size * 5
-        neighborhood_threshold = 7
+        search_radius = voxel_size * config.get('voxel_search_radius_multiplier_aggregated', 5)
+        neighborhood_threshold = config.get("voxel_neighborhood_threshold_aggregated", 7)
         valid_voxel_indices = [
             i for i, center in enumerate(tqdm(voxel_centers, desc="Voxel Neighborhood Search"))
             if len(kdtree.search_radius_vector_3d(center, search_radius)[1]) >= neighborhood_threshold
@@ -346,7 +387,7 @@ def main(args):
         print(f"Original points: {len(pcd_aggregated.points)}. Final cleaned points: {len(final_clean_cloud_np)}")
 
         # --- Step 4: Comprehensive Visualization ---
-        if args.visualize_filtered_comparison:
+        if args.vis_filter_aggregated_static_map:
             print("Preparing comparison visualization...")
 
             all_indices = set(range(len(pcd_aggregated.points)))
@@ -1263,6 +1304,8 @@ if __name__ == '__main__':
     parse.add_argument('--filter_combined_static_dynamic_pc', action='store_true',
                        help='Enable combined static and dynamic pc filtering')
 
+    parse.add_argument('--filter_static_pc_list', action='store_true',
+                       help='Enable per-frame advanced DBSCAN filtering before aggregation.')
     parse.add_argument('--filter_aggregated_static_map', action='store_true', help='Enable aggregated static map filtering')
 
     ####################### Meshing #####################################################
@@ -1272,8 +1315,10 @@ if __name__ == '__main__':
     parse.add_argument('--vis_static_frame_comparison', action='store_true', help='Visualize static frame comparison')
     parse.add_argument('--visualize_filtered_comparison', action='store_true',
                        help='Show a comparison of kept (green) and removed (red) points after aggregated filtering.')
-    parse.add_argument('--vis_filtered_aggregated_static', action='store_true',
-                           help='Enable filtered aggregated static kiss refinement')
+
+    parse.add_argument('--vis_filter_static_pc_list', action='store_true', help='Enable per-frame advanced voxel filtering before aggregation.')
+    parse.add_argument('--vis_filter_aggregated_static_pc', action='store_true', help='Enable aggregated static pc filter visualisation')
+
     parse.add_argument('--vis_static_before_combined_dynamic', action='store_true',
                        help='Enable static pc visualization before combined with dynamic points')
     parse.add_argument('--vis_dyn_before_reassignment', action='store_true',

@@ -327,7 +327,7 @@ def main(trucksc, indice, truckscenesyaml, args, config):
 
         # enlarge width of cars and trucks as mirrors often not included in bounding boxes --> avoid artifacts
         width_scale_car = 1.20
-        width_scale_truck = 1.25
+        width_scale_truck = 1.35
         for index, cat in enumerate(original_object_category_names):
             if cat == 'vehicle.car':
                 special_width = dims[index, 0] * width_scale_car
@@ -615,8 +615,8 @@ def main(trucksc, indice, truckscenesyaml, args, config):
             f"Shape mismatch! `pc_for_mapmos` has {pc_for_mapmos.shape[0]} points, but `final_static_map_mask` has {final_static_map_mask.shape[0]}."
 
         ############################ Visualization #############################################################
-        if args.vis_static_pc and args.filter_static_pc:
-            visualize_pointcloud_bbox(pc_ego,
+        if args.vis_static_pc and args.filter_static_pc and i % 5 == 0:
+            visualize_pointcloud_bbox(final_static_pc,
                                       boxes=boxes_ego,
                                       title=f"Fused filtered static sensor PC (filter mode {args.filter_mode}) + BBoxes + Ego BBox - Frame {i}",
                                       self_vehicle_range=self_range,

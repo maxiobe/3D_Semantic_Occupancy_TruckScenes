@@ -32,8 +32,22 @@ ror_nb_points: 5
 ror_radius: 0.5
 ror_radius_far: 0.5
 
+# Ransac ground plane parameters
+'ransac_dist_threshold': 0.40
+'ransac_filter_distance_threshold': 30.0
+
+# For single point cloud
+voxel_filter_size: 0.4                     # Size of each voxel (meters)
+voxel_search_radius_multiplier: 5.0        # Search radius = multiplier * voxel_size
+voxel_neighborhood_threshold: 15
+
+# For aggregated point cloud
+voxel_filter_size_aggregated: 0.2
+voxel_search_radius_multiplier_aggregated: 5.0
+voxel_neighborhood_threshold_aggregated: 7
+
 # Ground Plane Preservation
-'ground_z_min_threshold': -5.0
+'ground_z_min_threshold': -3.0
 'ground_z_max_threshold': 0.2
 
 # Parameters for lidar intensity filtering
