@@ -606,13 +606,67 @@ def assign_label_by_dual_obb_check(
             print(f">>> Path Taken: 3-Way Truck-Trailer-Forklift Rule")
             truck_idx = next(b_idx for b_idx in box_indices_tuple if box_cls_labels[b_idx] == ID_TRUCK)
             trailer_idx = next(b_idx for b_idx in box_indices_tuple if box_cls_labels[b_idx] == ID_TRAILER)
+            forklift_idx = next(b_idx for b_idx in box_indices_tuple if box_cls_labels[b_idx] == ID_FORKLIFT)
 
-            final_labels_for_group = _resolve_truck_overlap_with_dual_obb(
-                points_to_process_gpu, boxes_gpu[truck_idx], boxes_gpu[trailer_idx],
-                hitch_height, ID_TRUCK, ID_TRAILER, device
-            )
+            truck_box = boxes_gpu[truck_idx]
+            trailer_box = boxes_gpu[trailer_idx]
 
-            new_labels_gpu[point_indices_gpu] = final_labels_for_group.long()
+            cx, cy, cz, w, l, h, yaw = truck_box
+            dims_chassis = torch.tensor([l, w, hitch_height], device=device)
+            z_bottom_chassis = cz - h / 2.0
+            bottom_center_chassis = torch.tensor([cx, cy, z_bottom_chassis], device=device)
+            box_chassis_def = torch.cat([bottom_center_chassis, dims_chassis, yaw.unsqueeze(0)]).unsqueeze(0)
+            T_world_from_truck = transform_matrix_pytorch(truck_box[:3], torch_quat_from_yaw(yaw))
+            T_truck_from_world = torch.linalg.inv(T_world_from_truck)
+            trailer_center_world_homo = torch.cat([trailer_box[:3], torch.tensor([1.0], device=device)])
+            trailer_center_local = (T_truck_from_world @ trailer_center_world_homo)[:3]
+            boundary_x_local = trailer_center_local[0] + trailer_box[4] / 2.0
+            cab_len = l / 2.0 - boundary_x_local
+            cab_height = h - hitch_height
+            dims_cab = torch.tensor([cab_len, w, cab_height], device=device)
+            center_x_cab_local = boundary_x_local + cab_len / 2.0
+            z_bottom_cab_local = (-h / 2.0) + hitch_height
+            bottom_center_cab_local_homo = torch.tensor([center_x_cab_local, 0.0, z_bottom_cab_local, 1.0],
+                                                        device=device)
+            bottom_center_cab_world = (T_world_from_truck @ bottom_center_cab_local_homo)[:3]
+            box_cab_def = torch.cat([bottom_center_cab_world, dims_cab, yaw.unsqueeze(0)]).unsqueeze(0)
+            points_b = points_to_process_gpu.unsqueeze(0)
+            in_chassis_mask = points_in_boxes_all(points_b, box_chassis_def.unsqueeze(0)).squeeze().bool()
+            in_cab_mask = points_in_boxes_all(points_b, box_cab_def.unsqueeze(0)).squeeze().bool()
+            is_truck_point_mask = in_chassis_mask | in_cab_mask
+
+            # Label the points that are definitively part of the truck
+            truck_point_indices = point_indices_gpu[is_truck_point_mask]
+            new_labels_gpu[truck_point_indices] = ID_TRUCK
+
+            # --- STEP 2: Resolve remaining points between trailer and forklift ---
+
+            remaining_mask = ~is_truck_point_mask
+            remaining_indices_gpu = point_indices_gpu[remaining_mask]
+
+            if remaining_indices_gpu.shape[0] > 0:
+                remaining_points_xyz = points_to_process_gpu[remaining_mask, :3]
+
+                # Get "clean" points for the trailer (in trailer, but not truck or forklift)
+                mask_in_trailer = dyn_points_in_boxes[:, trailer_idx].bool()
+                mask_in_truck = dyn_points_in_boxes[:, truck_idx].bool()
+                mask_in_forklift = dyn_points_in_boxes[:, forklift_idx].bool()
+                mask_clean_trailer = mask_in_trailer & ~mask_in_truck & ~mask_in_forklift
+                clean_points_trailer_xyz = points_gpu[mask_clean_trailer, :3]
+
+                # Get "clean" points for the forklift (in forklift, but not truck or trailer)
+                mask_clean_forklift = mask_in_forklift & ~mask_in_truck & ~mask_in_trailer
+                clean_points_forklift_xyz = points_gpu[mask_clean_forklift, :3]
+
+                # Resolve based on distance
+                is_closer_to_trailer = resolve_overlap_by_distance_gpu(
+                    remaining_points_xyz,
+                    clean_points_trailer_xyz,
+                    clean_points_forklift_xyz
+                )
+
+                winner_labels_remaining = torch.where(is_closer_to_trailer, ID_TRAILER, ID_FORKLIFT)
+                new_labels_gpu[remaining_indices_gpu] = winner_labels_remaining
 
 
         elif is_truck_trailer_case:
