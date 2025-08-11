@@ -16,8 +16,8 @@ SAVE_PATH_GT="/home/max/ssd/Masterarbeit/TruckScenes/trainval/v1.0-trainval/gt/a
 DATA_ROOT="/home/max/ssd/Masterarbeit/TruckScenes/trainval/v1.0-trainval"
 VERSION="v1.0-trainval"
 SPLIT="train"
-START=3
-END=4
+START=2
+END=3
 LOAD_MODE="pointwise"
 
 USE_FLEXCLOUD=0
@@ -48,28 +48,29 @@ do
     mkdir -p "$SCENE_IO_DIR"
 
     # --- Step 1: Pre-processing with Open3D ---
-    #echo "Activating environment: $ENV_PREPROCESS for Part 1..."
-    #conda activate "$ENV_PREPROCESS"
-    #python "${PIPELINE_DIR}/part1_preprocess.py" \
-     #   --dataroot "$DATA_ROOT" \
-      #  --version "$VERSION" \
-       # --config_path "$CONFIG_PATH" \
-        #--save_path "$SAVE_PATH_GT" \
-       # --label_mapping "$LABEL_MAPPING" \
-       # --split "$SPLIT" \
-       # --idx "$i" \
-       # --load_mode "$LOAD_MODE" \
-       # --scene_io_dir "$SCENE_IO_DIR" \
-       # --icp_refinement \
-       # --initial_guess_mode ego_pose \
-       # --pose_error_plot \
-       # --filter_lidar_intensity \
-       # --filter_mode both \
-       # --filter_static_pc \
-       # --run_mapmos \
-       # --vis_aggregated_static_ego_ref_pc \
-       # --static_map_keyframes_only \
-       # --use_flexcloud \
+    echo "Activating environment: $ENV_PREPROCESS for Part 1..."
+    conda activate "$ENV_PREPROCESS"
+    python "${PIPELINE_DIR}/part1_preprocess.py" \
+        --dataroot "$DATA_ROOT" \
+        --version "$VERSION" \
+        --config_path "$CONFIG_PATH" \
+        --save_path "$SAVE_PATH_GT" \
+        --label_mapping "$LABEL_MAPPING" \
+        --split "$SPLIT" \
+        --idx "$i" \
+        --load_mode "$LOAD_MODE" \
+        --scene_io_dir "$SCENE_IO_DIR" \
+        --icp_refinement \
+        --initial_guess_mode ego_pose \
+        --pose_error_plot \
+        --filter_lidar_intensity \
+        --filter_mode both \
+        --filter_static_pc \
+        --run_mapmos \
+        --vis_aggregated_static_ego_ref_pc \
+        --static_map_keyframes_only \
+        --use_flexcloud "$USE_FLEXCLOUD" \
+        --vis_static_frame_comparison_kiss_refined \
         #--vis_raw_pc \
         #--vis_static_pc \
         #--vis_static_pc_global \
@@ -78,7 +79,7 @@ do
         #--vis_aggregated_static_ego_i_pc \
         #--vis_aggregated_static_global_pc \
         #--vis_aggregated_raw_pc_ego_i \
-    #conda deactivate
+    conda deactivate
 
     # --- Step 1b: Create ROS Bag ---
     #echo "--- Preparing to create ROS Bag ---"
@@ -134,10 +135,12 @@ do
             --icp_refinement \
             --pose_error_plot \
             --dynamic_map_keyframes_only \
+            --static_map_keyframes_only \
             --use_flexcloud "$USE_FLEXCLOUD" \
             --vis_dyn_ambigious_points \
             --vis_combined_static_dynamic_pc \
-            --vis_dyn_unreassigned_points
+            --vis_dyn_unreassigned_points \
+            --vis_static_frame_comparison
 
         conda deactivate
     else

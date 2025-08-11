@@ -404,3 +404,82 @@ def calculate_and_plot_pose_errors(poses_estimated, poses_reference, title_prefi
     if show_plot:
         plt.show()
     plt.close(fig)
+
+
+def visualize_point_cloud_comparison(
+        point_cloud_list: List[np.ndarray],
+        frame_indices: List[int],
+        colors: Optional[List[List[float]]] = None,
+        scene_name: str = "Scene",
+        window_size: Tuple[int, int] = (1280, 720)
+) -> None:
+    """
+    Visualizes a selection of point clouds from a list, each with a different color.
+
+    Args:
+        point_cloud_list (List[np.ndarray]): The complete list of point clouds, where each
+                                             element is a NumPy array of shape (N, 3) or (N, D>3).
+        frame_indices (List[int]): A list of 0-based indices specifying which frames from
+                                   point_cloud_list to visualize.
+        colors (Optional[List[List[float]]]): A list of RGB colors to apply to each
+                                               point cloud specified by frame_indices. If None,
+                                               a default color palette is used.
+        scene_name (str): A name for the scene, used in the visualization window title.
+        window_size (Tuple[int, int]): The (width, height) of the visualization window.
+    """
+    # Define a default, visually distinct color palette
+    if colors is None:
+        default_colors = [
+            [1.0, 0.0, 0.0],  # Red
+            [0.0, 0.0, 1.0],  # Blue
+            [0.0, 1.0, 0.0],  # Green
+            [1.0, 1.0, 0.0],  # Yellow
+            [0.0, 1.0, 1.0],  # Cyan
+            [1.0, 0.0, 1.0],  # Magenta
+        ]
+    else:
+        default_colors = colors
+
+    geometries_to_draw = []
+    valid_frame_indices = []
+
+    for i, frame_idx in enumerate(frame_indices):
+        if not (0 <= frame_idx < len(point_cloud_list)):
+            print(
+                f"⚠️ Warning: Index {frame_idx} is out of bounds for point_cloud_list (size: {len(point_cloud_list)}). Skipping.")
+            continue
+
+        pc_np = point_cloud_list[frame_idx]
+
+        if pc_np is None or pc_np.size == 0:
+            print(f"⚠️ Warning: Point cloud for frame index {frame_idx} is empty. Skipping.")
+            continue
+
+        if pc_np.ndim != 2 or pc_np.shape[1] < 3:
+            print(
+                f"⚠️ Warning: Point cloud for frame index {frame_idx} has invalid shape {pc_np.shape}. Expected (N, >=3). Skipping.")
+            continue
+
+        pcd = o3d.geometry.PointCloud()
+        pcd.points = o3d.utility.Vector3dVector(pc_np[:, :3])
+
+        color = default_colors[i % len(default_colors)]
+        pcd.paint_uniform_color(color)
+
+        geometries_to_draw.append(pcd)
+        valid_frame_indices.append(frame_idx)
+
+    # --- Visualization ---
+    if geometries_to_draw:
+        frame_labels = ", ".join(str(idx + 1) for idx in valid_frame_indices)  # Use 1-based for display
+        window_title = f"{scene_name} - Frames: {frame_labels}"
+
+        print(f"Visualizing frames: {frame_labels}")
+        o3d.visualization.draw_geometries(
+            geometries_to_draw,
+            window_name=window_title,
+            width=window_size[0],
+            height=window_size[1]
+        )
+    else:
+        print("❌ Error: No valid point clouds found for the selected frames. Nothing to visualize.")

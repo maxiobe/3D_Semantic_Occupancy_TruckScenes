@@ -8,7 +8,7 @@ from tqdm import tqdm
 from truckscenes import TruckScenes
 from scipy.spatial.transform import Rotation
 from collections import defaultdict
-from utils.visualization import visualize_pointcloud, visualize_pointcloud_bbox, visualize_occupancy_o3d, calculate_and_plot_pose_errors
+from utils.visualization import visualize_pointcloud, visualize_pointcloud_bbox, visualize_occupancy_o3d, calculate_and_plot_pose_errors, visualize_point_cloud_comparison
 from utils.pointcloud_processing import denoise_pointcloud
 from truckscenes.utils.geometry_utils import transform_matrix
 from mmcv.ops.points_in_boxes import (points_in_boxes_cpu, points_in_boxes_all)
@@ -34,8 +34,7 @@ def main(args):
     # --- Load the saved context from Part 1 ---
     print(f"Loading pipeline context from {context_file_path}...")
     context = np.load(context_file_path, allow_pickle=True)
-    #source_pc_list_all_frames = context['source_pc_list_all_frames']
-    #source_pc_sids_list_all_frames = context['source_pc_sids_list_all_frames']
+
     dict_list = context['dict_list']
     poses_kiss_icp = context['poses_kiss_icp']  # This might be None
     config = context['config'].item()  # .item() to get the dictionary back
@@ -48,89 +47,23 @@ def main(args):
     occ_size = context['occ_size']
     save_path = str(context['save_path'])
     scene_name = str(context['scene_name'])
-    # args_dict = context['args_dict'].item()
     FREE_LEARNING_INDEX = context['FREE_LEARNING_INDEX'].item()
     BACKGROUND_LEARNING_INDEX = context['BACKGROUND_LEARNING_INDEX'].item()
     sensors = context['sensors']
     cameras = context['cameras']
     sensor_max_ranges_arr = context['sensor_max_ranges_arr']
     self_range = context['self_range']
-    lidar_pc_final_global=context['lidar_pc_final_global']
-    lidar_pc_final_global_sensor_ids=context['lidar_pc_final_global_sensor_ids']
+    #lidar_pc_final_global=context['lidar_pc_final_global']
+    #lidar_pc_final_global_sensor_ids=context['lidar_pc_final_global_sensor_ids']
+
+    #lidar_pc_list_for_concat=context['lidar_pc_list_for_concat']
+    #lidar_pc_sids_list_for_concat=context['lidar_pc_sids_list_for_concat']
 
 
-    """"# Load the corrected poses from FlexCloud's output ---
-    flexcloud_output_dir = os.path.join(save_dir_flexcloud, "flexcloud_io/pcd_transformed")
-    flexcloud_xyz_poses_path = os.path.join(flexcloud_output_dir, "traj_matching/target_rs.txt")
-
-    print(f"Loading corrected poses from {flexcloud_xyz_poses_path}...")
-
-    if not os.path.exists(flexcloud_xyz_poses_path):
-        print(f"File not found: {flexcloud_xyz_poses_path}")
-        sys.exit(1)
-
-    try:
-        # Use np.loadtxt to load the xyz values directly into a 2D array
-        flexcloud_corrected_poses_xyz = np.loadtxt(flexcloud_xyz_poses_path)
-        print("Successfully loaded xyz poses.")
-    except Exception as e:
-        print(f"Could not load corrected poses. Error: {e}")
-        sys.exit(1)
-
-    if flexcloud_corrected_poses_xyz.shape[0] == 0 or flexcloud_corrected_poses_xyz.shape[1] != 3:
-        print("Corrected poses data is empty or has an incorrect format. Exiting.")
-        sys.exit(1)
-
-    num_frames = poses_kiss_icp.shape[0]
-    if flexcloud_corrected_poses_xyz.shape[0] != num_frames:
-        print(
-            f"Mismatch in number of frames. KISS-ICP has {num_frames}, FlexCloud has {flexcloud_corrected_poses_xyz.shape[0]}.")
-        sys.exit(1)
-
-    print(f"Number of frames: {flexcloud_corrected_poses_xyz.shape}")
-
-    flexcloud_corrected_poses = poses_kiss_icp.copy()
-
-    for i in range(num_frames):
-        # This line now correctly accesses the i-th pose matrix and its translation vector
-        flexcloud_corrected_poses[i, :3, 3] = flexcloud_corrected_poses_xyz[i, :]
-
-    print(f"Successfully loaded {flexcloud_corrected_poses.shape[0]} corrected poses.")
-
-    gt_poses = np.array([frame['ego_ref_from_ego_i'] for frame in dict_list])
-    kiss_poses = context['poses_kiss_icp']
-
-    # Comparison 1: KISS-ICP vs Ground Truth
-    if kiss_poses is not None:
-        calculate_and_plot_pose_errors(
-            poses_estimated=kiss_poses,
-            poses_reference=gt_poses,
-            title_prefix="KISS-ICP vs GT",
-            scene_name=scene_name,
-            save_dir=args.save_path,
-            show_plot=args.pose_error_plot
-        )
-
-    # Comparison 2: FlexCloud vs Ground Truth
-    calculate_and_plot_pose_errors(
-        poses_estimated=flexcloud_corrected_poses,
-        poses_reference=gt_poses,
-        title_prefix="FlexCloud vs GT",
-        scene_name=scene_name,
-        save_dir=args.save_path,
-        show_plot=args.pose_error_plot
-    )
-
-    # Comparison 3: FlexCloud vs KISS-ICP (to see the correction amount)
-    if kiss_poses is not None:
-        calculate_and_plot_pose_errors(
-            poses_estimated=flexcloud_corrected_poses,
-            poses_reference=kiss_poses,
-            title_prefix="FlexCloud vs KISS-ICP",
-            scene_name=scene_name,
-            save_dir=args.save_path,
-            show_plot=args.pose_error_plot
-        )"""
+    ########################### Cleaned map after mapmos with keyframes and non-keyframes ############################
+    static_points_refined=context['static_points_refined']
+    static_points_refined_sensor_ids=context['static_points_refined_sensor_ids']
+    ###################################################################################################################
 
 
     # Re-initialize the TruckScenes object
@@ -142,7 +75,8 @@ def main(args):
     OTHER_VEHICLE_ID = category_name_to_learning_id.get('vehicle.other', 13)
     PEDESTRIAN_ID = category_name_to_learning_id.get('human.pedestrian.adult', 13)
 
-    print(f"TRUCK_ID: {TRUCK_ID}, TRAILER_ID: {TRAILER_ID}, CAR_ID: {CAR_ID}, OTHER_VEHICLE_ID: {OTHER_VEHICLE_ID}, PEDESTRIAN_ID: {PEDESTRIAN_ID}")
+    print(
+        f"TRUCK_ID: {TRUCK_ID}, TRAILER_ID: {TRAILER_ID}, CAR_ID: {CAR_ID}, OTHER_VEHICLE_ID: {OTHER_VEHICLE_ID}, PEDESTRIAN_ID: {PEDESTRIAN_ID}")
 
     ########################## Specify thresholds for later aggregation based on overlap #########################
 
@@ -174,54 +108,235 @@ def main(args):
         }
     }
 
-    """point_cloud_flexcloud_path = os.path.join(flexcloud_output_dir, "refined_map.pcd")
-    point_cloud_flexcloud = o3d.io.read_point_cloud(point_cloud_flexcloud_path)
-    point_cloud_flexcloud_np = np.array(point_cloud_flexcloud.points)
 
-    visualize_pointcloud(point_cloud_flexcloud_np)
+    if args.use_flexcloud:
+        # Load the corrected poses from FlexCloud's output ---
+        flexcloud_output_dir = os.path.join(save_dir_flexcloud, "flexcloud_io/pcd_transformed")
+        flexcloud_xyz_poses_path = os.path.join(flexcloud_output_dir, "traj_matching/target_rs.txt")
 
-    unrefined_pc_ego_ref_list = []
+        print(f"Loading corrected poses from {flexcloud_xyz_poses_path}...")
 
-    for pose_index, frame_dict in enumerate(dict_list):
-        if frame_dict['is_key_frame']:
-            pc_to_transform = frame_dict['lidar_pc_ego_i']
-            xyz_points = pc_to_transform[:, :3]
-            label_col = pc_to_transform[:, 3:]
+        if not os.path.exists(flexcloud_xyz_poses_path):
+            print(f"File not found: {flexcloud_xyz_poses_path}")
+            sys.exit(1)
 
-            pose_to_transform = flexcloud_corrected_poses[pose_index]
+        try:
+            # Use np.loadtxt to load the xyz values directly into a 2D array
+            flexcloud_corrected_poses_xyz = np.loadtxt(flexcloud_xyz_poses_path)
+            print("Successfully loaded xyz poses.")
+        except Exception as e:
+            print(f"Could not load corrected poses. Error: {e}")
+            sys.exit(1)
 
-            ones_col = np.ones((xyz_points.shape[0], 1))
-            homogeneous_pc = np.hstack([xyz_points, ones_col])
+        if flexcloud_corrected_poses_xyz.shape[0] == 0 or flexcloud_corrected_poses_xyz.shape[1] != 3:
+            print("Corrected poses data is empty or has an incorrect format. Exiting.")
+            sys.exit(1)
 
-            transformed_homogeneous = pose_to_transform @ homogeneous_pc.T
-            tranformed_pc_ego_ref_xyz = transformed_homogeneous.T[:, :3]
+        num_frames = poses_kiss_icp.shape[0]
+        if flexcloud_corrected_poses_xyz.shape[0] != num_frames:
+            print(
+                f"Mismatch in number of frames. KISS-ICP has {num_frames}, FlexCloud has {flexcloud_corrected_poses_xyz.shape[0]}.")
+            sys.exit(1)
 
-            tranformed_pc_ego_ref = np.hstack([tranformed_pc_ego_ref_xyz, label_col])
+        print(f"Number of frames: {flexcloud_corrected_poses_xyz.shape}")
 
-            unrefined_pc_ego_ref_list.append(tranformed_pc_ego_ref)
+        flexcloud_corrected_poses = poses_kiss_icp.copy()
 
-    unrefined_pc = np.concatenate(unrefined_pc_ego_ref_list, axis=0)
+        for i in range(num_frames):
+            # This line now correctly accesses the i-th pose matrix and its translation vector
+            flexcloud_corrected_poses[i, :3, 3] = flexcloud_corrected_poses_xyz[i, :]
 
-    visualize_pointcloud(unrefined_pc)"""
+        print(f"Successfully loaded {flexcloud_corrected_poses.shape[0]} corrected poses.")
+
+        gt_poses = np.array([frame['ego_ref_from_ego_i'] for frame in dict_list])
+        kiss_poses = context['poses_kiss_icp']
+
+        # Comparison 1: KISS-ICP vs Ground Truth
+        if kiss_poses is not None:
+            calculate_and_plot_pose_errors(
+                poses_estimated=kiss_poses,
+                poses_reference=gt_poses,
+                title_prefix="KISS-ICP vs GT",
+                scene_name=scene_name,
+                save_dir=args.save_path,
+                show_plot=args.pose_error_plot
+            )
+
+        # Comparison 2: FlexCloud vs Ground Truth
+        calculate_and_plot_pose_errors(
+            poses_estimated=flexcloud_corrected_poses,
+            poses_reference=gt_poses,
+            title_prefix="FlexCloud vs GT",
+            scene_name=scene_name,
+            save_dir=args.save_path,
+            show_plot=args.pose_error_plot
+        )
+
+        # Comparison 3: FlexCloud vs KISS-ICP (to see the correction amount)
+        if kiss_poses is not None:
+            calculate_and_plot_pose_errors(
+                poses_estimated=flexcloud_corrected_poses,
+                poses_reference=kiss_poses,
+                title_prefix="FlexCloud vs KISS-ICP",
+                scene_name=scene_name,
+                save_dir=args.save_path,
+                show_plot=args.pose_error_plot
+            )
+
+        ################################# Transforming pc using the updated flexcloud poses ##########################
+        source_pc_list_all_frames = []
+        for idx, points_ego in enumerate(static_points_refined):
+            pose = flexcloud_corrected_poses[idx]
+            print(f"Applying refined pose {idx}: {pose}")
+
+            print(f"Points ego shape: {points_ego.shape}")
+
+            points_xyz = points_ego[:, :3]
+            points_homo = np.hstack((points_xyz, np.ones((points_xyz.shape[0], 1))))
+            points_transformed = (pose @ points_homo.T)[:3, :].T
+
+            if points_ego.shape[1] > 3:
+                other_features = points_ego[:, 3:]
+                points_transformed = np.hstack((points_transformed, other_features))
+
+            source_pc_list_all_frames.append(points_transformed)
+        source_pc_sids_list_all_frames = static_points_refined_sensor_ids
+
+        #################################### Filtering based on if only keyframes should be used ###########################
+        print(f"Static map aggregation: --static_map_keyframes_only is {args.static_map_keyframes_only}")
+
+        lidar_pc_list_for_concat = []
+        lidar_pc_sids_list_for_concat = []
+
+        for idx, frame_info in enumerate(dict_list):
+            is_key = frame_info['is_key_frame']
+            include_in_static_map = True
+            if args.static_map_keyframes_only and not is_key:
+                include_in_static_map = False
+
+            if include_in_static_map:
+                print(f"  Including frame {idx} (Keyframe: {is_key}) in static map aggregation.")
+                if idx < len(source_pc_list_all_frames) and source_pc_list_all_frames[idx].shape[0] > 0:
+                    lidar_pc_list_for_concat.append(source_pc_list_all_frames[idx])
+                    if idx < len(source_pc_sids_list_all_frames) and source_pc_sids_list_all_frames[idx].shape[
+                        0] > 0:
+                        lidar_pc_sids_list_for_concat.append(source_pc_sids_list_all_frames[idx])
+                    elif source_pc_list_all_frames[idx].shape[
+                        0] > 0:
+                        print(
+                            f"Warning: Frame {idx} has {source_pc_list_all_frames[idx].shape[0]} static points but missing/empty SIDs.")
+            else:
+                print(
+                    f"  Skipping frame {idx} (Keyframe: {is_key}) for static map aggregation due to --static_map_keyframes_only.")
 
 
+        """point_cloud_flexcloud_path = os.path.join(flexcloud_output_dir, "refined_map.pcd")
+        point_cloud_flexcloud = o3d.io.read_point_cloud(point_cloud_flexcloud_path)
+        point_cloud_flexcloud_np = np.array(point_cloud_flexcloud.points)
+    
+        visualize_pointcloud(point_cloud_flexcloud_np)
+    
+        unrefined_pc_ego_ref_list = []
+    
+        for pose_index, frame_dict in enumerate(dict_list):
+            if frame_dict['is_key_frame']:
+                pc_to_transform = frame_dict['lidar_pc_ego_i']
+                xyz_points = pc_to_transform[:, :3]
+                label_col = pc_to_transform[:, 3:]
+    
+                pose_to_transform = flexcloud_corrected_poses[pose_index]
+    
+                ones_col = np.ones((xyz_points.shape[0], 1))
+                homogeneous_pc = np.hstack([xyz_points, ones_col])
+    
+                transformed_homogeneous = pose_to_transform @ homogeneous_pc.T
+                tranformed_pc_ego_ref_xyz = transformed_homogeneous.T[:, :3]
+    
+                tranformed_pc_ego_ref = np.hstack([tranformed_pc_ego_ref_xyz, label_col])
+    
+                unrefined_pc_ego_ref_list.append(tranformed_pc_ego_ref)
+    
+        unrefined_pc = np.concatenate(unrefined_pc_ego_ref_list, axis=0)
+    
+        visualize_pointcloud(unrefined_pc)"""
+    else:
+        lidar_pc_list_for_concat = context['lidar_pc_list_for_concat']
+        lidar_pc_sids_list_for_concat = context['lidar_pc_sids_list_for_concat']
 
+    if args.vis_static_frame_comparison:
+        visualize_point_cloud_comparison(
+            point_cloud_list=lidar_pc_list_for_concat,
+            frame_indices=[1, 25],
+            scene_name="Comparing static frames: (red, blue, green, yellow, cyan, magenta)"
+        )
+
+
+    ####################################### Filtering on each point cloud in the list ###############################
+    #if args.filter_static_pc_list:
+     #   pass
+
+    ###############################################################################################################
+    lidar_pc_final_global = np.concatenate(lidar_pc_list_for_concat, axis=0)
+    lidar_pc_final_global_sensor_ids = np.concatenate(lidar_pc_sids_list_for_concat, axis=0)
 
     lidar_pc = lidar_pc_final_global.T
     lidar_pc_sensor_ids = lidar_pc_final_global_sensor_ids
 
-    ################################## Filtering of static aggregated point cloud #####################################
-    if args.filter_aggregated_static_pc and args.filter_mode != 'none':
-        pcd_o3d = o3d.geometry.PointCloud()
-        pcd_o3d.points = o3d.utility.Vector3dVector(lidar_pc[:3, :].T)
-        filtered_pcd_o3d, kept_indices = denoise_pointcloud(pcd_o3d, args.filter_mode, config,
-                                                            location_msg="aggregated static points")
-        lidar_pc = lidar_pc[:, kept_indices]
-        lidar_pc_sensor_ids = lidar_pc_sensor_ids[kept_indices]
+    ################################################ Filtering on aggregated point cloud #############################
+    if args.filter_aggregated_static_map:
+        print(f"\n--- Filtering aggregated map with {lidar_pc_final_global.shape[0]} points ---")
 
-    assert lidar_pc.shape[1] == lidar_pc_sensor_ids.shape[0], (
-        f"point count ({lidar_pc.shape[1]}) != sensor_ids count ({lidar_pc_sensor_ids.shape[0]})"
-    )
+        # 1. Create Open3D PointCloud object
+        pcd_aggregated = o3d.geometry.PointCloud()
+        pcd_aggregated.points = o3d.utility.Vector3dVector(lidar_pc_final_global[:, :3])
+
+        voxel_size = 0.2  # meters
+        voxel_grid = o3d.geometry.VoxelGrid.create_from_point_cloud(pcd_aggregated, voxel_size=voxel_size)
+
+        voxels = voxel_grid.get_voxels()
+        voxel_centers = np.array([voxel_grid.get_voxel_center_coordinate(v.grid_index) for v in voxels])
+
+        # Build a KDTree on the centers of the occupied voxels for fast searching
+        pcd_centers = o3d.geometry.PointCloud()
+        pcd_centers.points = o3d.utility.Vector3dVector(voxel_centers)
+        kdtree = o3d.geometry.KDTreeFlann(pcd_centers)
+
+        search_radius = voxel_size * 2.5  # Search a bit more than 2 voxels away
+        neighborhood_threshold = 4  # A voxel must have at least 4 neighbors in the radius to be kept
+
+        valid_voxel_indices = []
+
+        for i in range(len(voxel_centers)):
+            # Search for neighbors within the radius
+            # Returns the number of neighbors found
+            [k, idx, _] = kdtree.search_radius_vector_3d(voxel_centers[i], search_radius)
+
+            # Check if the number of neighbors (including the point itself) meets the threshold
+            if k >= neighborhood_threshold:
+                valid_voxel_indices.append(i)
+
+        # Get the grid indices of the voxels we decided to keep
+        valid_voxels_to_keep = {tuple(voxels[i].grid_index) for i in valid_voxel_indices}
+
+        # This is the slowest part: iterating all original points.
+        # A more optimized way would be to pre-assign points to voxels.
+        final_kept_indices = [
+            i for i, point in enumerate(pcd_aggregated.points)
+            if tuple(voxel_grid.get_voxel(point)) in valid_voxels_to_keep
+        ]
+
+        pcd_final_clean = pcd_aggregated.select_by_index(final_kept_indices)
+
+        # Also filter your numpy array to keep all features (intensity, etc.)
+        final_clean_cloud_np = lidar_pc_final_global[final_kept_indices]
+
+        print(f"Original points: {len(pcd_aggregated.points)}. Cleaned points: {len(pcd_final_clean.points)}")
+        o3d.visualization.draw_geometries([pcd_final_clean], window_name="Final Cleaned Map")
+
+
+
+    ######################################
+
 
     ############################## Visualization ######################################################
     if args.vis_filtered_aggregated_static:
@@ -1141,10 +1256,13 @@ if __name__ == '__main__':
     parse.add_argument('--filter_combined_static_dynamic_pc', action='store_true',
                        help='Enable combined static and dynamic pc filtering')
 
+    parse.add_argument('--filter_aggregated_static_map', action='store_true', help='Enable aggregated static map filtering')
+
     ####################### Meshing #####################################################
     parse.add_argument('--meshing', action='store_true', help='Enable meshing')
 
     ######################### Visualization #################################################
+    parse.add_argument('--vis_static_frame_comparison', action='store_true', help='Visualize static frame comparison')
     parse.add_argument('--vis_filtered_aggregated_static', action='store_true',
                            help='Enable filtered aggregated static kiss refinement')
     parse.add_argument('--vis_static_before_combined_dynamic', action='store_true',
@@ -1168,6 +1286,8 @@ if __name__ == '__main__':
     ######################## Use only keyframes for static and dynamic map ##########################################
     parse.add_argument('--dynamic_map_keyframes_only', action='store_true',
                        help='Aggregate dynamic object points using only segments from keyframes..')
+    parse.add_argument('--static_map_keyframes_only', action='store_true',
+                       help='Build the final static map using only keyframes (after ICP, if enabled, ran on all frames).')
 
     args = parse.parse_args()
 
