@@ -270,7 +270,6 @@ def main(args):
             scene_name="Comparing static frames: (red, blue, green, yellow, cyan, magenta)"
         )
 
-
     ####################################### Filtering on each point cloud in the list ###############################
     #if args.filter_static_pc_list:
      #   pass
@@ -279,64 +278,101 @@ def main(args):
     lidar_pc_final_global = np.concatenate(lidar_pc_list_for_concat, axis=0)
     lidar_pc_final_global_sensor_ids = np.concatenate(lidar_pc_sids_list_for_concat, axis=0)
 
-    lidar_pc = lidar_pc_final_global.T
-    lidar_pc_sensor_ids = lidar_pc_final_global_sensor_ids
-
     ################################################ Filtering on aggregated point cloud #############################
     if args.filter_aggregated_static_map:
         print(f"\n--- Filtering aggregated map with {lidar_pc_final_global.shape[0]} points ---")
 
-        # 1. Create Open3D PointCloud object
+        # 1. Create Open3D PointCloud object from the full dataset
         pcd_aggregated = o3d.geometry.PointCloud()
         pcd_aggregated.points = o3d.utility.Vector3dVector(lidar_pc_final_global[:, :3])
 
-        voxel_size = 0.2  # meters
+        # --- Step 1: Identify ground points to protect using RANSAC ---
+        print("Segmenting ground plane using RANSAC...")
+        plane_model, ground_indices = pcd_aggregated.segment_plane(distance_threshold=0.35,
+                                                                   ransac_n=3,
+                                                                   num_iterations=1000)
+        ground_indices_set = set(ground_indices)
+        print(f"RANSAC identified {len(ground_indices_set)} ground points to protect.")
+
+        """ground_pcd = pcd_aggregated.select_by_index(ground_indices)
+
+        # Optional: Color the ground points for clarity
+        ground_pcd.paint_uniform_color([0.0, 0.8, 0.0])  # Green
+
+        # 5. Visualize ONLY the ground point cloud
+        print("Displaying ground plane points...")
+        o3d.visualization.draw_geometries(
+            [ground_pcd],
+            window_name="Detected Ground Plane Points"
+        )"""
+
+        # --- Step 2: Run the Voxel Neighborhood Filter on the whole cloud ---
+        print("Running Voxel Neighborhood Filter...")
+        voxel_size = 0.2
         voxel_grid = o3d.geometry.VoxelGrid.create_from_point_cloud(pcd_aggregated, voxel_size=voxel_size)
 
+        # Get all occupied voxels and build a KDTree on their centers for fast search
         voxels = voxel_grid.get_voxels()
         voxel_centers = np.array([voxel_grid.get_voxel_center_coordinate(v.grid_index) for v in voxels])
-
-        # Build a KDTree on the centers of the occupied voxels for fast searching
-        pcd_centers = o3d.geometry.PointCloud()
-        pcd_centers.points = o3d.utility.Vector3dVector(voxel_centers)
+        pcd_centers = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(voxel_centers))
         kdtree = o3d.geometry.KDTreeFlann(pcd_centers)
 
-        search_radius = voxel_size * 2.5  # Search a bit more than 2 voxels away
-        neighborhood_threshold = 4  # A voxel must have at least 4 neighbors in the radius to be kept
-
-        valid_voxel_indices = []
-
-        for i in range(len(voxel_centers)):
-            # Search for neighbors within the radius
-            # Returns the number of neighbors found
-            [k, idx, _] = kdtree.search_radius_vector_3d(voxel_centers[i], search_radius)
-
-            # Check if the number of neighbors (including the point itself) meets the threshold
-            if k >= neighborhood_threshold:
-                valid_voxel_indices.append(i)
-
-        # Get the grid indices of the voxels we decided to keep
+        # Find which voxels have enough neighbors
+        search_radius = voxel_size * 5
+        neighborhood_threshold = 7
+        valid_voxel_indices = [
+            i for i, center in enumerate(tqdm(voxel_centers, desc="Voxel Neighborhood Search"))
+            if len(kdtree.search_radius_vector_3d(center, search_radius)[1]) >= neighborhood_threshold
+        ]
         valid_voxels_to_keep = {tuple(voxels[i].grid_index) for i in valid_voxel_indices}
 
-        # This is the slowest part: iterating all original points.
-        # A more optimized way would be to pre-assign points to voxels.
-        final_kept_indices = [
-            i for i, point in enumerate(pcd_aggregated.points)
-            if tuple(voxel_grid.get_voxel(point)) in valid_voxels_to_keep
-        ]
+        # Efficiently find all points that fall into the valid voxels
+        voxel_to_points_map = defaultdict(list)
+        for i in range(len(pcd_aggregated.points)):
+            voxel_to_points_map[tuple(voxel_grid.get_voxel(pcd_aggregated.points[i]))].append(i)
 
-        pcd_final_clean = pcd_aggregated.select_by_index(final_kept_indices)
+        kept_by_filter_indices = [idx for grid in valid_voxels_to_keep for idx in voxel_to_points_map.get(grid, [])]
+        kept_by_filter_set = set(kept_by_filter_indices)
+        print(f"Voxel neighborhood filter kept {len(kept_by_filter_set)} points.")
 
-        # Also filter your numpy array to keep all features (intensity, etc.)
-        final_clean_cloud_np = lidar_pc_final_global[final_kept_indices]
+        # --- Step 3: Combine filter results with ground protection ---
+        final_indices_combined = list(kept_by_filter_set.union(ground_indices_set))
+        print(f"Total points after combining filter and ground protection: {len(final_indices_combined)}")
 
-        print(f"Original points: {len(pcd_aggregated.points)}. Cleaned points: {len(pcd_final_clean.points)}")
-        o3d.visualization.draw_geometries([pcd_final_clean], window_name="Final Cleaned Map")
+        # Create the final clean numpy arrays using the combined indices
+        final_clean_cloud_np = lidar_pc_final_global[final_indices_combined]
+        final_clean_sids_np = lidar_pc_final_global_sensor_ids[final_indices_combined]
 
+        print(f"Original points: {len(pcd_aggregated.points)}. Final cleaned points: {len(final_clean_cloud_np)}")
 
+        # --- Step 4: Comprehensive Visualization ---
+        if args.visualize_filtered_comparison:
+            print("Preparing comparison visualization...")
 
-    ######################################
+            all_indices = set(range(len(pcd_aggregated.points)))
+            final_kept_set = set(final_indices_combined)
+            truly_removed_indices = list(all_indices - final_kept_set)
 
+            pcd_kept = pcd_aggregated.select_by_index(final_indices_combined)
+            pcd_kept.paint_uniform_color([0.0, 0.8, 0.0])
+
+            pcd_removed = pcd_aggregated.select_by_index(truly_removed_indices)
+            pcd_removed.paint_uniform_color([1.0, 0.0, 0.0])
+
+            # USE THE MORE STABLE VISUALIZATION FUNCTION
+            o3d.visualization.draw_geometries(
+                [pcd_kept, pcd_removed],
+                window_name="Kept (Green), Removed (Red), Plane (Blue)"
+            )
+
+    else:
+        # If filtering is disabled, the final cloud is just the original aggregated cloud
+        final_clean_cloud_np = lidar_pc_final_global
+        final_clean_sids_np = lidar_pc_final_global_sensor_ids
+
+    ###################################################################################################
+    lidar_pc = final_clean_cloud_np.T
+    lidar_pc_sensor_ids = final_clean_sids_np
 
     ############################## Visualization ######################################################
     if args.vis_filtered_aggregated_static:
@@ -653,36 +689,7 @@ def main(args):
 
                 labels_before_refinement = dyn_points_semantic[:, 3:4]
 
-                # --- Step 3: Call the refinement function on the dynamic subset ---
-                """final_dyn_labels, reassigned_indices = assign_label_by_L_shape(
-                    overlap_idxs=overlap_idxs,
-                    pt_to_box_map=pt_to_box_map,
-                    points=dyn_points,  # Pass only the dynamic points
-                    boxes=boxes_with_labels,
-                    boxes_iou=boxes_for_overlap,
-                    box_cls_labels=box_categories,
-                    pt_labels=labels_before_refinement,
-                    all_object_points=all_points_per_box,
-                    dyn_points_in_boxes=points_in_boxes[0],
-                    ID_TRAILER=TRAILER_ID,
-                    ID_TRUCK=TRUCK_ID,
-                    ID_FORKLIFT=OTHER_VEHICLE_ID,
-                    high_overlap_threshold=0.85,
-                )"""
-
-                """final_dyn_labels, reassigned_indices = assign_label_by_dual_obb_check(
-                    overlap_idxs=np.array(truly_ambiguous_idxs),
-                    pt_to_box_map=pt_to_box_map,
-                    points=dyn_points,
-                    boxes=boxes_for_lshape_logic,
-                    box_cls_labels=box_categories,
-                    pt_labels=labels_before_refinement,
-                    ID_TRAILER=TRAILER_ID,
-                    ID_TRUCK=TRUCK_ID,
-                    ID_FORKLIFT=OTHER_VEHICLE_ID,
-                    device=device
-                )"""
-
+                # --- Step 3: Call the refinement function on the dynamic subset --
                 final_dyn_labels, reassigned_indices = assign_label_by_dual_obb_check(
                     overlap_idxs=overlap_idxs,
                     pt_to_box_map=pt_to_box_map,
@@ -1263,6 +1270,8 @@ if __name__ == '__main__':
 
     ######################### Visualization #################################################
     parse.add_argument('--vis_static_frame_comparison', action='store_true', help='Visualize static frame comparison')
+    parse.add_argument('--visualize_filtered_comparison', action='store_true',
+                       help='Show a comparison of kept (green) and removed (red) points after aggregated filtering.')
     parse.add_argument('--vis_filtered_aggregated_static', action='store_true',
                            help='Enable filtered aggregated static kiss refinement')
     parse.add_argument('--vis_static_before_combined_dynamic', action='store_true',
