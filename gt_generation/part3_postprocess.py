@@ -819,20 +819,6 @@ def main(args):
             scene_semantic_points_sids = scene_semantic_points_sids[mask]
             print(f"Scene semantic points after applying range filtering: {scene_semantic_points.shape}")
 
-            ################################## Filtering #################################################
-            if args.filter_combined_static_dynamic_pc and args.filter_mode != 'none':
-                print(f"Filtering {scene_points.shape}")
-                pcd_to_filter = o3d.geometry.PointCloud()
-                pcd_to_filter.points = o3d.utility.Vector3dVector(scene_points[:, :3])
-
-                filtered_pcd, kept_indices = denoise_pointcloud(pcd_to_filter, args.filter_mode, config,
-                                                                location_msg="final scene points")
-                scene_points = np.asarray(filtered_pcd.points)
-                scene_points_sids = scene_points_sids[kept_indices]
-                scene_semantic_points = scene_semantic_points[kept_indices]
-                scene_semantic_points_sids = scene_semantic_points_sids[kept_indices]
-            ############################################################################################
-
             assert scene_points.shape[0] == scene_points_sids.shape[0], (
                 f"scene_points count ({scene_points.shape[0]}) != scene_points_sids count ({scene_points_sids.shape[0]})"
             )
@@ -842,393 +828,164 @@ def main(args):
                 f"scene_semantic_points_sids count ({scene_semantic_points_sids.shape[0]})"
             )
 
-            ############################ Meshing #######################################################
-            if args.meshing:
-                print("--- Starting Meshing and Voxelization---")
-                print(f"Shape of scene points before meshing: {scene_points.shape}")
-
-                ################## get mesh via Possion Surface Reconstruction ##############
-                point_cloud_original = o3d.geometry.PointCloud()  # Initialize point cloud object
-                with_normal2 = o3d.geometry.PointCloud()  # Initialize point cloud object
-                point_cloud_original.points = o3d.utility.Vector3dVector(
-                    scene_points[:, :3])  # converts scene_points array into open3D point cloud format
-                with_normal = preprocess(point_cloud_original, config)  # Uses the preprocess function to compute normals
-                with_normal2.points = with_normal.points  # copies the processed points and normals to another point clouds
-                with_normal2.normals = with_normal.normals  # copies the processed points and normals to another point clouds
-
-                # Generate mesh from point cloud using Poisson Surface Reconstruction
-                mesh, _ = create_mesh_from_map(None, config['depth'], config['n_threads'],
-                                               config['min_density'], with_normal2)
-                scene_points = np.asarray(mesh.vertices, dtype=float)
-
-                print(f"Shape of scene points after meshing: {scene_points.shape}")
-
-                ################## remain points with a spatial range ##############
-                mask_meshing = in_range_mask(scene_points, pc_range)
-
-                scene_points = scene_points[mask_meshing]  # Filter points within a spatial range
-
-                pcd_meshed_vox_indices = scene_points.copy()
-
-                pcd_meshed_vox_indices[:, 0] = (pcd_meshed_vox_indices[:, 0] - pc_range[0]) / voxel_size
-                pcd_meshed_vox_indices[:, 1] = (pcd_meshed_vox_indices[:, 1] - pc_range[1]) / voxel_size
-                pcd_meshed_vox_indices[:, 2] = (pcd_meshed_vox_indices[:, 2] - pc_range[2]) / voxel_size
-                pcd_meshed_vox_indices = np.floor(pcd_meshed_vox_indices).astype(int)
-
-                pcd_meshed_vox_indices[:, 0] = np.clip(pcd_meshed_vox_indices[:, 0], 0, occ_size[0] - 1)
-                pcd_meshed_vox_indices[:, 1] = np.clip(pcd_meshed_vox_indices[:, 1], 0, occ_size[1] - 1)
-                pcd_meshed_vox_indices[:, 2] = np.clip(pcd_meshed_vox_indices[:, 2], 0, occ_size[2] - 1)
-
-                binary_voxel_grid = np.zeros(occ_size, dtype=bool)
-                unique_meshed_voxel_indices = np.unique(pcd_meshed_vox_indices[:, :3], axis=0)
-                if unique_meshed_voxel_indices.shape[0] > 0:
-                    binary_voxel_grid[
-                        unique_meshed_voxel_indices[:, 0], unique_meshed_voxel_indices[:, 1], unique_meshed_voxel_indices[:,
-                                                                                              2]] = True
-                # Get voxel indices (vx,vy,vz) of occupied cells
-                x_occ_idx, y_occ_idx, z_occ_idx = np.where(binary_voxel_grid)
-                fov_voxel_indices = np.stack([x_occ_idx, y_occ_idx, z_occ_idx], axis=-1)
-
-                if fov_voxel_indices.shape[0] == 0:
-                    print(
-                        "No fov_voxels (occupied centers) found after voxelizing mesh. Occupancy grid will be empty/free.")
-                else:
-                    # Convert these occupied voxel indices to world coordinates (centers of voxels)
-                    fov_voxels_world_xyz = fov_voxel_indices.astype(float)
-                    fov_voxels_world_xyz[:, :3] = (fov_voxels_world_xyz[:, :3] + 0.5) * voxel_size
-                    fov_voxels_world_xyz[:, 0] += pc_range[0]
-                    fov_voxels_world_xyz[:, 1] += pc_range[1]
-                    fov_voxels_world_xyz[:, 2] += pc_range[2]
-
-                    # Assign semantics using Chamfer distance
-                    dense_voxels_needing_labels_world = fov_voxels_world_xyz
-
-                    if scene_semantic_points.shape[0] == 0:
-                        print(
-                            "WARNING: scene_semantic_points is empty for Chamfer. Labeled occupancy will be based on FREE_LEARNING_INDEX.")
-                        # occupancy_grid is already initialized to FREE
-                    else:
-                        print(
-                            f"Chamfer - Dense (target needing labels) world shape: {dense_voxels_needing_labels_world.shape}")
-                        print(f"Chamfer - Sparse (source with labels) world shape: {scene_semantic_points.shape}")
-
-                        x_chamfer = torch.from_numpy(dense_voxels_needing_labels_world).cuda().unsqueeze(0).float()
-                        y_chamfer = torch.from_numpy(scene_semantic_points[:, :3]).cuda().unsqueeze(
-                            0).float()  # Use XYZ for distance
-
-                        _, _, idx1_chamfer, _ = chamfer.forward(x_chamfer, y_chamfer)
-                        indices_from_chamfer = idx1_chamfer[0].cpu().numpy()
-
-                        assigned_labels_for_dense = scene_semantic_points[
-                            indices_from_chamfer, 3]  # Assuming label is 4th col (index 3)
-
-                        # Combine world coords of dense voxels with their new labels
-                        dense_voxels_world_with_semantic = np.concatenate(
-                            [dense_voxels_needing_labels_world, assigned_labels_for_dense[:, np.newaxis]], axis=1
-                        )
-
-                        # Convert these world points (now with labels) to final voxel coordinates [vx,vy,vz,label]
-                        temp_voxel_coords = dense_voxels_world_with_semantic.copy()
-                        temp_voxel_coords[:, 0] = (temp_voxel_coords[:, 0] - pc_range[0]) / voxel_size
-                        temp_voxel_coords[:, 1] = (temp_voxel_coords[:, 1] - pc_range[1]) / voxel_size
-                        temp_voxel_coords[:, 2] = (temp_voxel_coords[:, 2] - pc_range[2]) / voxel_size
-
-                        # Store integer voxel coordinates and labels
-                        dense_voxels_with_semantic_voxelcoords = np.zeros_like(temp_voxel_coords, dtype=int)
-                        dense_voxels_with_semantic_voxelcoords[:, :3] = np.floor(temp_voxel_coords[:, :3]).astype(int)
-                        dense_voxels_with_semantic_voxelcoords[:, 3] = temp_voxel_coords[:, 3].astype(int)  # Labels column
-
-                        # Clip to ensure within bounds
-                        dense_voxels_with_semantic_voxelcoords[:, 0] = np.clip(dense_voxels_with_semantic_voxelcoords[:, 0],
-                                                                               0, occ_size[0] - 1)
-                        dense_voxels_with_semantic_voxelcoords[:, 1] = np.clip(dense_voxels_with_semantic_voxelcoords[:, 1],
-                                                                               0, occ_size[1] - 1)
-                        dense_voxels_with_semantic_voxelcoords[:, 2] = np.clip(dense_voxels_with_semantic_voxelcoords[:, 2],
-                                                                               0, occ_size[2] - 1)
-
-                        unique_final_vox_indices, unique_idx_map = np.unique(dense_voxels_with_semantic_voxelcoords[:, :3],
-                                                                             axis=0, return_index=True)
-                        labels_for_unique_final_voxels = dense_voxels_with_semantic_voxelcoords[unique_idx_map, 3]
-
-                        occupancy_grid = np.full(occ_size, FREE_LEARNING_INDEX, dtype=np.uint8)
-
-                        if unique_final_vox_indices.shape[0] > 0:
-                            occupancy_grid[
-                                unique_final_vox_indices[:, 0],
-                                unique_final_vox_indices[:, 1],
-                                unique_final_vox_indices[:, 2]
-                            ] = labels_for_unique_final_voxels
-
-                        occupied_mask = occupancy_grid != FREE_LEARNING_INDEX
-                        total_occupied_voxels = np.sum(occupied_mask)
-
-                        if np.any(occupied_mask):  # Check if there are any occupied voxels
-                            vx, vy, vz = np.where(occupied_mask)  # Get the indices (vx, vy, vz) of all occupied voxels
-                            labels_at_occupied = occupancy_grid[vx, vy, vz]  # Get the labels at these occupied locations
-
-                            # Stack them into the [vx, vy, vz, label] format
-                            dense_voxels_with_semantic_voxelcoords_save = np.stack([vx, vy, vz, labels_at_occupied],
-                                                                                   axis=-1).astype(int)
-                        else:
-                            # If no voxels are occupied (e.g., the entire grid is FREE_LEARNING_INDEX)
-                            dense_voxels_with_semantic_voxelcoords_save = np.zeros((0, 4), dtype=int)
-            ######################## No meshing ############################################
+            ################################### Voxelization start ###############################################
+            print("--- Starting Voxelization without Meshing ---")
+            if scene_semantic_points.shape[0] == 0:
+                print("No semantic points available. Occupancy grid will be empty/free.")
             else:
-                print("--- Starting Voxelization without Meshing ---")
-                if scene_semantic_points.shape[0] == 0:
-                    print("No semantic points available. Occupancy grid will be empty/free.")
+                ############################### Calculating visibility masks ###########################
+                print("Creating Lidar visibility masks")
+
+                points_to_voxelize = scene_semantic_points.copy()
+
+                labels = points_to_voxelize[:, 3].astype(int)
+
+                voxel_indices_float = np.zeros_like(points_to_voxelize[:, :3])
+                voxel_indices_float[:, 0] = (points_to_voxelize[:, 0] - pc_range[0]) / voxel_size
+                voxel_indices_float[:, 1] = (points_to_voxelize[:, 1] - pc_range[1]) / voxel_size
+                voxel_indices_float[:, 2] = (points_to_voxelize[:, 2] - pc_range[2]) / voxel_size
+
+                voxel_indices_int = np.floor(voxel_indices_float).astype(int)
+
+                dense_voxels_with_semantic_voxelcoords = np.concatenate(
+                    [voxel_indices_int, labels[:, np.newaxis]], axis=1
+                )
+
+                # Clip to ensure within bounds
+                dense_voxels_with_semantic_voxelcoords[:, 0] = np.clip(dense_voxels_with_semantic_voxelcoords[:, 0], 0,
+                                                                       occ_size[0] - 1)
+                dense_voxels_with_semantic_voxelcoords[:, 1] = np.clip(dense_voxels_with_semantic_voxelcoords[:, 1], 0,
+                                                                       occ_size[1] - 1)
+                dense_voxels_with_semantic_voxelcoords[:, 2] = np.clip(dense_voxels_with_semantic_voxelcoords[:, 2], 0,
+                                                                       occ_size[2] - 1)
+
+                occupancy_grid = np.full(occ_size, FREE_LEARNING_INDEX, dtype=np.uint8)
+                if dense_voxels_with_semantic_voxelcoords.shape[0] > 0:
+                    occupancy_grid[
+                        dense_voxels_with_semantic_voxelcoords[:, 0],
+                        dense_voxels_with_semantic_voxelcoords[:, 1],
+                        dense_voxels_with_semantic_voxelcoords[:, 2]
+                    ] = dense_voxels_with_semantic_voxelcoords[:, 3]
+
+                points_origin = sensor_origins[scene_semantic_points_sids]
+                print(f"Points origin shape: {points_origin.shape}")
+                points_label = scene_semantic_points[:, 3].astype(int)
+                print(f"Points label shape: {points_label.shape}")
+                points = scene_semantic_points[:, :3]
+                print(f"Points shape: {points.shape}")
+
+                ############################### Lidar visibility mask calculation gpu ###############################
+                print("Creating Lidar visibility masks using GPU...")
+                print("\nTiming GPU Lidar visibility calculation...")
+                start_time_gpu = time.perf_counter()
+
+                voxel_state_gpu, voxel_label_gpu = calculate_lidar_visibility_gpu_host(
+                    points_cpu=points,  # (N,3) hits
+                    points_origin_cpu=points_origin,  # (N,3) original sensor origins
+                    points_label_cpu=points_label,  # (N,) semantic labels (ensure int32)
+                    pc_range_cpu_list=pc_range,  # [xmin,ymin,zmin,xmax,ymax,zmax] list
+                    voxel_size_cpu_scalar=voxel_size,  # scalar voxel_size from config
+                    spatial_shape_cpu_list=occ_size,  # [Dx,Dy,Dz] list from config
+                    occupancy_grid_cpu=occupancy_grid,  # pre-computed (Dx,Dy,Dz) aggregated occupancy (uint8)
+                    FREE_LEARNING_INDEX_cpu=FREE_LEARNING_INDEX,  # semantic index for free space
+                    FREE_LABEL_placeholder_cpu=-1,  # internal placeholder for initializing labels on GPU
+                    points_sensor_indices_cpu=scene_semantic_points_sids.astype(np.int32),
+                    sensor_max_ranges_cpu=sensor_max_ranges_arr
+                )
+
+                end_time_gpu = time.perf_counter()
+                print(f"GPU Lidar visibility calculation took: {end_time_gpu - start_time_gpu:.4f} seconds")
+
+                print(f"GPU Voxel state shape: {voxel_state_gpu.shape}")
+                print(f"GPU Voxel label shape: {voxel_label_gpu.shape}")
+                print("Finished Lidar visibility masks (GPU).")
+
+                ######################## Visualization of lidar visibility mask #############################
+                if args.vis_lidar_visibility:
+                    voxel_size_for_viz = np.array([voxel_size] * 3)
+                    visualize_occupancy_o3d(
+                        voxel_state=voxel_state_gpu,
+                        voxel_label=voxel_label_gpu,
+                        pc_range=pc_range,
+                        voxel_size=voxel_size_for_viz,
+                        class_color_map=CLASS_COLOR_MAP,
+                        default_color=DEFAULT_COLOR,
+                        show_semantics=True,
+                        show_free=True,
+                        show_unobserved=False
+                    )
+                #############################################################################################
+
+                ############################# Prepare semantics for saving ###################################
+
+                occupied_mask = occupancy_grid != FREE_LEARNING_INDEX
+                total_occupied_voxels = np.sum(occupied_mask)
+
+                if np.any(occupied_mask):  # Check if there are any occupied voxels
+                    vx, vy, vz = np.where(occupied_mask)  # Get the indices (vx, vy, vz) of all occupied voxels
+                    labels_at_occupied = occupancy_grid[vx, vy, vz]  # Get the labels at these occupied locations
+
+                    # Stack them into the [vx, vy, vz, label] format
+                    dense_voxels_with_semantic_voxelcoords_save = np.stack([vx, vy, vz, labels_at_occupied],
+                                                                           axis=-1).astype(int)
                 else:
-                    ############################### Calculating visibility masks ###########################
-                    print("Creating Lidar visibility masks")
+                    # If no voxels are occupied (e.g., the entire grid is FREE_LEARNING_INDEX)
+                    dense_voxels_with_semantic_voxelcoords_save = np.zeros((0, 4), dtype=int)
 
-                    points_to_voxelize = scene_semantic_points.copy()
+                # final_voxel_state_to_save will be the grid with 0 (UNOBS), 1 (FREE), 2 (OCC)
+                final_voxel_state_to_save = voxel_state_gpu
+                # final_voxel_label_to_save will be the grid with semantic labels for OCC,
+                # and FREE_LEARNING_INDEX for FREE and UNOBS. This is the 'semantics' array for Occ3D.
+                final_voxel_label_to_save = voxel_label_gpu
 
-                    labels = points_to_voxelize[:, 3].astype(int)
+                ####################################### Calculate camera visibility mask GPU ######################
+                print(f"Calculating camera visibility for cameras (GPU): {cameras}")
+                start_time_cam_vis_gpu = time.perf_counter()
 
-                    voxel_indices_float = np.zeros_like(points_to_voxelize[:, :3])
-                    voxel_indices_float[:, 0] = (points_to_voxelize[:, 0] - pc_range[0]) / voxel_size
-                    voxel_indices_float[:, 1] = (points_to_voxelize[:, 1] - pc_range[1]) / voxel_size
-                    voxel_indices_float[:, 2] = (points_to_voxelize[:, 2] - pc_range[2]) / voxel_size
+                mask_camera = calculate_camera_visibility_gpu_host(  # Call the GPU host function
+                    trucksc=trucksc,
+                    current_sample_token=frame_dict['sample_token'],  # Pass current sample token
+                    lidar_voxel_state_cpu=voxel_state_gpu,  # Output from LiDAR visibility
+                    pc_range_cpu_list=pc_range,
+                    voxel_size_cpu_scalar=voxel_size,
+                    spatial_shape_cpu_list=occ_size,
+                    camera_names=cameras,
+                    DEPTH_MAX_val=config.get('camera_ray_depth_max', 100.0)  # e.g., 70 meters
+                )
 
-                    voxel_indices_int = np.floor(voxel_indices_float).astype(int)
+                print(f"Camera visibility mask cpu has the shape: {mask_camera.shape}")
 
-                    dense_voxels_with_semantic_voxelcoords = np.concatenate(
-                        [voxel_indices_int, labels[:, np.newaxis]], axis=1
+                end_time_cam_vis_gpu = time.perf_counter()
+                print(
+                    f"GPU Camera visibility calculation took: {end_time_cam_vis_gpu - start_time_cam_vis_gpu:.4f} seconds")
+
+                mask_camera_binary = np.zeros_like(mask_camera, dtype=np.uint8)
+                mask_camera_binary[mask_camera == STATE_OCCUPIED] = 1
+                mask_camera_binary[mask_camera == STATE_FREE] = 1
+
+                ######################### Visualization of camera visibility mask #################################
+                if args.vis_camera_visibility:
+                    print("Visualizing GPU Camera Visibility Mask Results...")
+
+                    temp_voxel_state_for_cam_viz = mask_camera.copy()
+
+                    voxel_size_arr_viz = np.array([voxel_size] * 3) if isinstance(voxel_size,
+                                                                                  (int, float)) else np.array(
+                        voxel_size)
+
+                    visualize_occupancy_o3d(
+                        voxel_state=temp_voxel_state_for_cam_viz,
+                        voxel_label=voxel_label_gpu,
+                        pc_range=pc_range,
+                        voxel_size=voxel_size_arr_viz,
+                        class_color_map=CLASS_COLOR_MAP,
+                        default_color=DEFAULT_COLOR,
+                        show_semantics=True,  # Show semantics of camera-visible regions
+                        show_free=True,  # Not showing LiDAR-free for this specific mask viz
+                        show_unobserved=False  # Shows what's NOT camera visible as unobserved
                     )
+                ##################################################################################################
 
-                    # Clip to ensure within bounds
-                    dense_voxels_with_semantic_voxelcoords[:, 0] = np.clip(dense_voxels_with_semantic_voxelcoords[:, 0], 0,
-                                                                           occ_size[0] - 1)
-                    dense_voxels_with_semantic_voxelcoords[:, 1] = np.clip(dense_voxels_with_semantic_voxelcoords[:, 1], 0,
-                                                                           occ_size[1] - 1)
-                    dense_voxels_with_semantic_voxelcoords[:, 2] = np.clip(dense_voxels_with_semantic_voxelcoords[:, 2], 0,
-                                                                           occ_size[2] - 1)
-
-                    occupancy_grid = np.full(occ_size, FREE_LEARNING_INDEX, dtype=np.uint8)
-                    if dense_voxels_with_semantic_voxelcoords.shape[0] > 0:
-                        occupancy_grid[
-                            dense_voxels_with_semantic_voxelcoords[:, 0],
-                            dense_voxels_with_semantic_voxelcoords[:, 1],
-                            dense_voxels_with_semantic_voxelcoords[:, 2]
-                        ] = dense_voxels_with_semantic_voxelcoords[:, 3]
-
-                    points_origin = sensor_origins[scene_semantic_points_sids]
-                    print(f"Points origin shape: {points_origin.shape}")
-                    points_label = scene_semantic_points[:, 3].astype(int)
-                    print(f"Points label shape: {points_label.shape}")
-                    points = scene_semantic_points[:, :3]
-                    print(f"Points shape: {points.shape}")
-
-                    ############################### Lidar visibility mask calculation gpu ###############################
-                    print("Creating Lidar visibility masks using GPU...")
-                    print("\nTiming GPU Lidar visibility calculation...")
-                    start_time_gpu = time.perf_counter()
-
-                    voxel_state_gpu, voxel_label_gpu = calculate_lidar_visibility_gpu_host(
-                        points_cpu=points,  # (N,3) hits
-                        points_origin_cpu=points_origin,  # (N,3) original sensor origins
-                        points_label_cpu=points_label,  # (N,) semantic labels (ensure int32)
-                        pc_range_cpu_list=pc_range,  # [xmin,ymin,zmin,xmax,ymax,zmax] list
-                        voxel_size_cpu_scalar=voxel_size,  # scalar voxel_size from config
-                        spatial_shape_cpu_list=occ_size,  # [Dx,Dy,Dz] list from config
-                        occupancy_grid_cpu=occupancy_grid,  # pre-computed (Dx,Dy,Dz) aggregated occupancy (uint8)
-                        FREE_LEARNING_INDEX_cpu=FREE_LEARNING_INDEX,  # semantic index for free space
-                        FREE_LABEL_placeholder_cpu=-1,  # internal placeholder for initializing labels on GPU
-                        points_sensor_indices_cpu=scene_semantic_points_sids.astype(np.int32),
-                        sensor_max_ranges_cpu=sensor_max_ranges_arr
-                    )
-
-                    end_time_gpu = time.perf_counter()
-                    print(f"GPU Lidar visibility calculation took: {end_time_gpu - start_time_gpu:.4f} seconds")
-
-                    print(f"GPU Voxel state shape: {voxel_state_gpu.shape}")
-                    print(f"GPU Voxel label shape: {voxel_label_gpu.shape}")
-                    print("Finished Lidar visibility masks (GPU).")
-
-                    ######################## Visualization of lidar visibility mask #############################
-                    if args.vis_lidar_visibility:
-                        voxel_size_for_viz = np.array([voxel_size] * 3)
-                        visualize_occupancy_o3d(
-                            voxel_state=voxel_state_gpu,
-                            voxel_label=voxel_label_gpu,
-                            pc_range=pc_range,
-                            voxel_size=voxel_size_for_viz,
-                            class_color_map=CLASS_COLOR_MAP,
-                            default_color=DEFAULT_COLOR,
-                            show_semantics=True,
-                            show_free=True,
-                            show_unobserved=False
-                        )
-                    #############################################################################################
-
-                    ########################## Lidar visibility mask cpu #######################################
-                    run_cpu_comparison_lidar = False
-                    if run_cpu_comparison_lidar:
-                        if isinstance(voxel_size, (int, float)):
-                            voxel_size_masks = [voxel_size, voxel_size, voxel_size]
-
-                        # --- Time the CPU execution ---
-                        print("\nTiming CPU Lidar visibility calculation...")
-                        start_time_cpu = time.perf_counter()
-
-                        voxel_state, voxel_label = calculate_lidar_visibility(
-                            points=scene_semantic_points[:, :3],  # (N,3) hits in ego–i
-                            points_origin=points_origin,  # (N,3) ray‐starts in ego–i
-                            points_label=points_label,  # (N,) semantic of each hit
-                            pc_range=pc_range,  # [xmin,ymin,zmin,xmax,ymax,zmax]
-                            voxel_size=voxel_size_masks,  # [vx,vy,vz]
-                            spatial_shape=occ_size,  # (H,W,Z)
-                            occupancy_grid=occupancy_grid,
-                            FREE_LEARNING_INDEX=FREE_LEARNING_INDEX,
-                            points_sensor_indices=scene_semantic_points_sids,
-                            sensor_max_ranges=sensor_max_ranges_arr
-                        )
-
-                        end_time_cpu = time.perf_counter()
-                        print(f"CPU Lidar visibility calculation took: {end_time_cpu - start_time_cpu:.4f} seconds")
-
-                        print(voxel_state.shape)
-                        print(voxel_label.shape)
-
-                        print("Finished Lidar visibility masks cpu")
-
-                        ######################## Visualization of lidar visibility mask #############################
-                        if args.vis_lidar_visibility:
-                            print("Visualizing with Semantics and Free")
-                            visualize_occupancy_o3d(
-                                voxel_state=voxel_state,
-                                voxel_label=voxel_label,
-                                pc_range=pc_range,
-                                voxel_size=voxel_size_masks,  # Pass as array
-                                class_color_map=CLASS_COLOR_MAP,
-                                default_color=DEFAULT_COLOR,
-                                show_semantics=True,
-                                show_free=True,
-                                show_unobserved=False
-                            )
-                        ###########################################################################################
-
-                    ############################# Prepare semantics for saving ###################################
-
-                    occupied_mask = occupancy_grid != FREE_LEARNING_INDEX
-                    total_occupied_voxels = np.sum(occupied_mask)
-
-                    if np.any(occupied_mask):  # Check if there are any occupied voxels
-                        vx, vy, vz = np.where(occupied_mask)  # Get the indices (vx, vy, vz) of all occupied voxels
-                        labels_at_occupied = occupancy_grid[vx, vy, vz]  # Get the labels at these occupied locations
-
-                        # Stack them into the [vx, vy, vz, label] format
-                        dense_voxels_with_semantic_voxelcoords_save = np.stack([vx, vy, vz, labels_at_occupied],
-                                                                               axis=-1).astype(int)
-                    else:
-                        # If no voxels are occupied (e.g., the entire grid is FREE_LEARNING_INDEX)
-                        dense_voxels_with_semantic_voxelcoords_save = np.zeros((0, 4), dtype=int)
-
-                    # final_voxel_state_to_save will be the grid with 0 (UNOBS), 1 (FREE), 2 (OCC)
-                    final_voxel_state_to_save = voxel_state_gpu
-                    # final_voxel_label_to_save will be the grid with semantic labels for OCC,
-                    # and FREE_LEARNING_INDEX for FREE and UNOBS. This is the 'semantics' array for Occ3D.
-                    final_voxel_label_to_save = voxel_label_gpu
-
-                    ####################################### Calculate camera visibility mask GPU ######################
-                    print(f"Calculating camera visibility for cameras (GPU): {cameras}")
-                    start_time_cam_vis_gpu = time.perf_counter()
-
-                    mask_camera = calculate_camera_visibility_gpu_host(  # Call the GPU host function
-                        trucksc=trucksc,
-                        current_sample_token=frame_dict['sample_token'],  # Pass current sample token
-                        lidar_voxel_state_cpu=voxel_state_gpu,  # Output from LiDAR visibility
-                        pc_range_cpu_list=pc_range,
-                        voxel_size_cpu_scalar=voxel_size,
-                        spatial_shape_cpu_list=occ_size,
-                        camera_names=cameras,
-                        DEPTH_MAX_val=config.get('camera_ray_depth_max', 100.0)  # e.g., 70 meters
-                    )
-
-                    print(f"Camera visibility mask cpu has the shape: {mask_camera.shape}")
-
-                    end_time_cam_vis_gpu = time.perf_counter()
-                    print(
-                        f"GPU Camera visibility calculation took: {end_time_cam_vis_gpu - start_time_cam_vis_gpu:.4f} seconds")
-
-                    mask_camera_binary = np.zeros_like(mask_camera, dtype=np.uint8)
-                    mask_camera_binary[mask_camera == STATE_OCCUPIED] = 1
-                    mask_camera_binary[mask_camera == STATE_FREE] = 1
-
-                    ######################### Visualization of camera visibility mask #################################
-                    if args.vis_camera_visibility:
-                        print("Visualizing GPU Camera Visibility Mask Results...")
-
-                        temp_voxel_state_for_cam_viz = mask_camera.copy()
-
-                        voxel_size_arr_viz = np.array([voxel_size] * 3) if isinstance(voxel_size,
-                                                                                      (int, float)) else np.array(
-                            voxel_size)
-
-                        visualize_occupancy_o3d(
-                            voxel_state=temp_voxel_state_for_cam_viz,
-                            voxel_label=voxel_label_gpu,
-                            pc_range=pc_range,
-                            voxel_size=voxel_size_arr_viz,
-                            class_color_map=CLASS_COLOR_MAP,
-                            default_color=DEFAULT_COLOR,
-                            show_semantics=True,  # Show semantics of camera-visible regions
-                            show_free=True,  # Not showing LiDAR-free for this specific mask viz
-                            show_unobserved=False  # Shows what's NOT camera visible as unobserved
-                        )
-                    ##################################################################################################
-
-                    ######################## Calculate camera visibility mask CPU #####################################
-                    run_cpu_comparison_camera = False
-                    if run_cpu_comparison_camera:
-                        print(f"Calculating camera visibility for cameras (CPU): {cameras}")
-
-                        voxel_size_arr = np.array([voxel_size] * 3) if isinstance(voxel_size, (int, float)) else np.array(
-                            voxel_size)
-                        occ_size_arr = np.array(occ_size)
-
-                        start_time_cam_vis = time.perf_counter()
-                        mask_camera = calculate_camera_visibility_cpu(
-                            trucksc=trucksc,
-                            current_sample_token=frame_dict['sample_token'],  # Pass current sample token
-                            lidar_voxel_state=final_voxel_state_to_save,  # Output from LiDAR visibility
-                            pc_range_params=pc_range,
-                            voxel_size_params=voxel_size_arr,
-                            spatial_shape_params=occ_size_arr,
-                            camera_names=cameras,
-                            DEPTH_MAX=config.get('camera_ray_depth_max', 100.0)  # Make it configurable
-                        )
-                        print(f"Camera visibility mask cpu has the shape: {mask_camera.shape}")
-
-                        end_time_cam_vis = time.perf_counter()
-                        print(
-                            f"CPU Camera visibility calculation took: {end_time_cam_vis - start_time_cam_vis:.4f} seconds")
-
-                        mask_camera_binary = np.zeros_like(mask_camera, dtype=np.uint8)
-                        mask_camera_binary[mask_camera == STATE_OCCUPIED] = 1
-                        mask_camera_binary[mask_camera == STATE_FREE] = 1
-
-                        ######################### Visualization of camera visibility mask #################################
-                        if args.vis_camera_visibility:
-                            print("Visualizing Camera Visibility Mask Results...")
-                            temp_voxel_state_for_cam_viz = mask_camera.copy()
-
-                            voxel_size_arr_viz = np.array([voxel_size] * 3) if isinstance(voxel_size,
-                                                                                          (int, float)) else np.array(
-                                voxel_size)
-
-                            visualize_occupancy_o3d(
-                                voxel_state=temp_voxel_state_for_cam_viz,
-                                voxel_label=voxel_label_gpu,
-                                pc_range=pc_range,
-                                voxel_size=voxel_size_arr_viz,
-                                class_color_map=CLASS_COLOR_MAP,
-                                default_color=DEFAULT_COLOR,
-                                show_semantics=True,  # Show semantics of camera-visible regions
-                                show_free=True,  # Not showing LiDAR-free for this specific mask viz
-                                show_unobserved=False  # Shows what's NOT camera visible as unobserved
-                            )
-                            ###############################################################################################
             #################################### Saving the semantics, lidar mask, camera mask ##########################
             print(
                 f"Shape of dense_voxels_with_semantic_voxelcoords for saving: {dense_voxels_with_semantic_voxelcoords_save.shape}")
@@ -1296,20 +1053,10 @@ if __name__ == '__main__':
                         help='A flag indicating whether FlexCloud processing was run (1) or not (0).')
 
     ######################################## Filter settings ##########################################
-    parse.add_argument('--filter_mode', type=str, default='none', choices=['none', 'sor', 'ror', 'both'],
-                       help='Noise filtering method to apply before meshing')
-
-    parse.add_argument('--filter_aggregated_static_pc', action='store_true',
-                       help='Enable aggregated static pc filtering')
-    parse.add_argument('--filter_combined_static_dynamic_pc', action='store_true',
-                       help='Enable combined static and dynamic pc filtering')
-
     parse.add_argument('--filter_static_pc_list', action='store_true',
                        help='Enable per-frame advanced DBSCAN filtering before aggregation.')
     parse.add_argument('--filter_aggregated_static_map', action='store_true', help='Enable aggregated static map filtering')
 
-    ####################### Meshing #####################################################
-    parse.add_argument('--meshing', action='store_true', help='Enable meshing')
 
     ######################### Visualization #################################################
     parse.add_argument('--vis_static_frame_comparison', action='store_true', help='Visualize static frame comparison')
