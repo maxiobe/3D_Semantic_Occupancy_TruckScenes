@@ -14,8 +14,8 @@ from truckscenes.utils.geometry_utils import transform_matrix
 from mmcv.ops.points_in_boxes import (points_in_boxes_cpu, points_in_boxes_all)
 # import chamfer
 from pyquaternion import Quaternion
-from utils.occupancy_utils import calculate_camera_visibility_gpu_host, calculate_lidar_visibility_gpu_host, calculate_camera_visibility_cpu, calculate_lidar_visibility
-from utils.pointcloud_processing import in_range_mask, preprocess_cloud, create_mesh_from_map, preprocess
+from utils.occupancy_utils import calculate_camera_visibility_gpu_host, calculate_lidar_visibility_gpu_host
+from utils.pointcloud_processing import in_range_mask
 from utils.constants import CLASS_COLOR_MAP, STATE_FREE, STATE_UNOBSERVED, STATE_OCCUPIED, DEFAULT_COLOR
 from utils.refinement import assign_label_by_L_shape, assign_label_by_dual_obb_check
 from utils.bbox_utils import is_point_centroid_z_similar, are_box_sizes_similar, get_object_overlap_signature_BATCH, compare_signatures_class_based_OVERLAP_RATIO
@@ -53,18 +53,12 @@ def main(args):
     cameras = context['cameras']
     sensor_max_ranges_arr = context['sensor_max_ranges_arr']
     self_range = context['self_range']
-    #lidar_pc_final_global=context['lidar_pc_final_global']
-    #lidar_pc_final_global_sensor_ids=context['lidar_pc_final_global_sensor_ids']
-
-    #lidar_pc_list_for_concat=context['lidar_pc_list_for_concat']
-    #lidar_pc_sids_list_for_concat=context['lidar_pc_sids_list_for_concat']
-
+    gt_relative_poses_arr = context['gt_relative_poses_arr']
 
     ########################### Cleaned map after mapmos with keyframes and non-keyframes ############################
-    static_points_refined=context['static_points_refined']
-    static_points_refined_sensor_ids=context['static_points_refined_sensor_ids']
+    static_points_refined_loaded=context['static_points_refined']
+    static_points_refined_sensor_ids_loaded=context['static_points_refined_sensor_ids']
     ###################################################################################################################
-
 
     # Re-initialize the TruckScenes object
     trucksc = TruckScenes(version=args.version, dataroot=args.dataroot, verbose=False)
@@ -108,8 +102,65 @@ def main(args):
         }
     }
 
+    ####################################### Filtering on each point cloud in the list ###############################
+    if args.filter_static_pc_list:
+        print("\n--- Applying per-frame DBSCAN filtering to the list of point clouds ---")
+        static_points_refined = []
+        static_points_refined_sensor_ids = []
+        for filter_idx, pc_to_filter_np in enumerate(static_points_refined_loaded):
+            sids_to_filter = static_points_refined_sensor_ids_loaded[filter_idx]
+
+            # Convert numpy array to Open3D PointCloud
+            pcd_to_filter = o3d.geometry.PointCloud()
+            pcd_to_filter.points = o3d.utility.Vector3dVector(pc_to_filter_np[:, :3])
+
+            # Call your new advanced filtering function
+            """cleaned_pcd, kept_indices = denoise_near_points_dbscan(
+                pcd_to_filter,
+                config
+            )"""
+            cleaned_pcd, kept_indices = denoise_near_points_voxel(
+                pcd_to_filter,
+                config
+            )
+
+            # Use the returned indices to filter both the points and the sensor IDs
+            cleaned_pc_np = pc_to_filter_np[kept_indices]
+            cleaned_sids = sids_to_filter[kept_indices]
+
+            # Append the cleaned results to the new lists
+            static_points_refined.append(cleaned_pc_np)
+            static_points_refined_sensor_ids.append(cleaned_sids)
+
+            if args.vis_filter_static_pc_list:
+                print(f"\nVisualizing filter result for frame {filter_idx}...")
+
+                # Get indices of points that were removed
+                all_indices = np.arange(len(pc_to_filter_np))
+                removed_indices = np.setdiff1d(all_indices, kept_indices)
+
+                # Create a point cloud for the points that were KEPT
+                pcd_kept = pcd_to_filter.select_by_index(kept_indices)
+                pcd_kept.paint_uniform_color([0.0, 0.8, 0.0])  # Green
+
+                # Create a point cloud for the points that were REMOVED
+                pcd_removed = pcd_to_filter.select_by_index(removed_indices)
+                pcd_removed.paint_uniform_color([1.0, 0.0, 0.0])  # Red
+
+                # Draw both point clouds together
+                o3d.visualization.draw_geometries(
+                    [pcd_kept, pcd_removed],
+                    window_name=f"Per-Frame Filter Result - Frame {filter_idx}"
+                )
+
+    else:
+        print("\n--- Skipping per-frame filtering ---")
+        static_points_refined = static_points_refined_loaded
+        static_points_refined_sensor_ids = static_points_refined_sensor_ids_loaded
+
 
     if args.use_flexcloud:
+        print("Using flexcloud path for final static map")
         # Load the corrected poses from FlexCloud's output ---
         flexcloud_output_dir = os.path.join(save_dir_flexcloud, "flexcloud_io/pcd_transformed")
         flexcloud_xyz_poses_path = os.path.join(flexcloud_output_dir, "traj_matching/target_rs.txt")
@@ -183,13 +234,17 @@ def main(args):
                 show_plot=args.pose_error_plot
             )
 
+        print("Assigned FlexCloud poses for all consecutive frames.")
+        poses_to_transform = flexcloud_corrected_poses.copy()
+
         ################################# Transforming pc using the updated flexcloud poses ##########################
+        print("Transforming static point clouds in reference frame....")
         source_pc_list_all_frames = []
         for idx, points_ego in enumerate(static_points_refined):
             pose = flexcloud_corrected_poses[idx]
-            print(f"Applying refined pose {idx}: {pose}")
+            #print(f"Applying refined pose {idx}: {pose}")
 
-            print(f"Points ego shape: {points_ego.shape}")
+            #print(f"Points ego shape: {points_ego.shape}")
 
             points_xyz = points_ego[:, :3]
             points_homo = np.hstack((points_xyz, np.ones((points_xyz.shape[0], 1))))
@@ -205,8 +260,8 @@ def main(args):
         #################################### Filtering based on if only keyframes should be used ###########################
         print(f"Static map aggregation: --static_map_keyframes_only is {args.static_map_keyframes_only}")
 
-        lidar_pc_list_for_concat_unfiltered = []
-        lidar_pc_sids_list_for_concat_unfiltered = []
+        lidar_pc_list_for_concat = []
+        lidar_pc_sids_list_for_concat = []
 
         for idx, frame_info in enumerate(dict_list):
             is_key = frame_info['is_key_frame']
@@ -217,10 +272,10 @@ def main(args):
             if include_in_static_map:
                 print(f"  Including frame {idx} (Keyframe: {is_key}) in static map aggregation.")
                 if idx < len(source_pc_list_all_frames) and source_pc_list_all_frames[idx].shape[0] > 0:
-                    lidar_pc_list_for_concat_unfiltered.append(source_pc_list_all_frames[idx])
+                    lidar_pc_list_for_concat.append(source_pc_list_all_frames[idx])
                     if idx < len(source_pc_sids_list_all_frames) and source_pc_sids_list_all_frames[idx].shape[
                         0] > 0:
-                        lidar_pc_sids_list_for_concat_unfiltered.append(source_pc_sids_list_all_frames[idx])
+                        lidar_pc_sids_list_for_concat.append(source_pc_sids_list_all_frames[idx])
                     elif source_pc_list_all_frames[idx].shape[
                         0] > 0:
                         print(
@@ -259,73 +314,122 @@ def main(args):
         unrefined_pc = np.concatenate(unrefined_pc_ego_ref_list, axis=0)
     
         visualize_pointcloud(unrefined_pc)"""
+    elif args.icp_refinement and poses_kiss_icp.ndim == 3:
+        print("Using kiss-icp path for static map aggregation.")
+
+        ########################## Transform point clouds #####################################
+        print("Transforming static point clouds in reference frame....")
+        source_pc_list_all_frames = []
+        for idx, points_ego in enumerate(static_points_refined):
+            pose = poses_kiss_icp[idx]
+            #print(f"Applying refined pose {idx}: {pose}")
+
+            #print(f"Points ego shape: {points_ego.shape}")
+
+            points_xyz = points_ego[:, :3]
+            points_homo = np.hstack((points_xyz, np.ones((points_xyz.shape[0], 1))))
+            points_transformed = (pose @ points_homo.T)[:3, :].T
+
+            if points_ego.shape[1] > 3:
+                other_features = points_ego[:, 3:]
+                points_transformed = np.hstack((points_transformed, other_features))
+
+            source_pc_list_all_frames.append(points_transformed)
+        source_pc_sids_list_all_frames = static_points_refined_sensor_ids
+
+        #################################### Filtering based on if only keyframes should be used ###########################
+        print(f"Static map aggregation: --static_map_keyframes_only is {args.static_map_keyframes_only}")
+
+        lidar_pc_list_for_concat = []
+        lidar_pc_sids_list_for_concat = []
+
+        for idx, frame_info in enumerate(dict_list):
+            is_key = frame_info['is_key_frame']
+            include_in_static_map = True
+            if args.static_map_keyframes_only and not is_key:
+                include_in_static_map = False
+
+            if include_in_static_map:
+                print(f"  Including frame {idx} (Keyframe: {is_key}) in static map aggregation.")
+                if idx < len(source_pc_list_all_frames) and source_pc_list_all_frames[idx].shape[0] > 0:
+                    lidar_pc_list_for_concat.append(source_pc_list_all_frames[idx])
+                    if idx < len(source_pc_sids_list_all_frames) and source_pc_sids_list_all_frames[idx].shape[
+                        0] > 0:
+                        lidar_pc_sids_list_for_concat.append(source_pc_sids_list_all_frames[idx])
+                    elif source_pc_list_all_frames[idx].shape[
+                        0] > 0:
+                        print(
+                            f"Warning: Frame {idx} has {source_pc_list_all_frames[idx].shape[0]} static points but missing/empty SIDs.")
+            else:
+                print(
+                    f"  Skipping frame {idx} (Keyframe: {is_key}) for static map aggregation due to --static_map_keyframes_only.")
+
+        print("Assigned KISS-ICP poses for all consecutive processes.")
+        poses_to_transform = poses_kiss_icp
     else:
-        lidar_pc_list_for_concat_unfiltered = context['lidar_pc_list_for_concat']
-        lidar_pc_sids_list_for_concat_unfiltered = context['lidar_pc_sids_list_for_concat']
+        print("Using dataset ground truth poses for static map aggregation.")
+        #lidar_pc_list_for_concat_unfiltered = context['lidar_pc_list_for_concat']
+        #lidar_pc_sids_list_for_concat_unfiltered = context['lidar_pc_sids_list_for_concat']
+
+        ########################## Transform point clouds #####################################
+        print("Transforming static point clouds in reference frame....")
+        source_pc_list_all_frames = []
+        for idx, points_ego in enumerate(static_points_refined):
+            pose = gt_relative_poses_arr[idx]
+            #print(f"Applying refined pose {idx}: {pose}")
+
+            #print(f"Points ego shape: {points_ego.shape}")
+
+            points_xyz = points_ego[:, :3]
+            points_homo = np.hstack((points_xyz, np.ones((points_xyz.shape[0], 1))))
+            points_transformed = (pose @ points_homo.T)[:3, :].T
+
+            if points_ego.shape[1] > 3:
+                other_features = points_ego[:, 3:]
+                points_transformed = np.hstack((points_transformed, other_features))
+
+            source_pc_list_all_frames.append(points_transformed)
+        source_pc_sids_list_all_frames = static_points_refined_sensor_ids
+
+        #################################### Filtering based on if only keyframes should be used ###########################
+        print(f"Static map aggregation: --static_map_keyframes_only is {args.static_map_keyframes_only}")
+
+        lidar_pc_list_for_concat = []
+        lidar_pc_sids_list_for_concat = []
+
+        for idx, frame_info in enumerate(dict_list):
+            is_key = frame_info['is_key_frame']
+            include_in_static_map = True
+            if args.static_map_keyframes_only and not is_key:
+                include_in_static_map = False
+
+            if include_in_static_map:
+                print(f"  Including frame {idx} (Keyframe: {is_key}) in static map aggregation.")
+                if idx < len(source_pc_list_all_frames) and source_pc_list_all_frames[idx].shape[0] > 0:
+                    lidar_pc_list_for_concat.append(source_pc_list_all_frames[idx])
+                    if idx < len(source_pc_sids_list_all_frames) and source_pc_sids_list_all_frames[idx].shape[
+                        0] > 0:
+                        lidar_pc_sids_list_for_concat.append(source_pc_sids_list_all_frames[idx])
+                    elif source_pc_list_all_frames[idx].shape[
+                        0] > 0:
+                        print(
+                            f"Warning: Frame {idx} has {source_pc_list_all_frames[idx].shape[0]} static points but missing/empty SIDs.")
+            else:
+                print(
+                    f"  Skipping frame {idx} (Keyframe: {is_key}) for static map aggregation due to --static_map_keyframes_only.")
+
+        print("Assigned Dataset ground truth poses for all consecutive processes.")
+        poses_to_transform = gt_relative_poses_arr
+
+    print(f"Shape of poses to transform: {poses_to_transform.shape}")
+    #print(poses_to_transform)
 
     if args.vis_static_frame_comparison:
         visualize_point_cloud_comparison(
-            point_cloud_list=lidar_pc_list_for_concat_unfiltered,
+            point_cloud_list=lidar_pc_list_for_concat,
             frame_indices=[1, 25],
             scene_name="Comparing static frames: (red, blue, green, yellow, cyan, magenta)"
         )
-
-    ####################################### Filtering on each point cloud in the list ###############################
-    if args.filter_static_pc_list:
-        print("\n--- Applying per-frame DBSCAN filtering to the list of point clouds ---")
-        lidar_pc_list_for_concat = []
-        lidar_pc_sids_list_for_concat = []
-        for filter_idx, pc_to_filter_np in enumerate(
-                tqdm(lidar_pc_list_for_concat_unfiltered, desc="Per-frame Filtering")):
-            sids_to_filter = lidar_pc_sids_list_for_concat_unfiltered[filter_idx]
-
-            # Convert numpy array to Open3D PointCloud
-            pcd_to_filter = o3d.geometry.PointCloud()
-            pcd_to_filter.points = o3d.utility.Vector3dVector(pc_to_filter_np[:, :3])
-
-            # Call your new advanced filtering function
-            """cleaned_pcd, kept_indices = denoise_near_points_dbscan(
-                pcd_to_filter,
-                config
-            )"""
-            cleaned_pcd, kept_indices = denoise_near_points_voxel(
-                pcd_to_filter,
-                config
-            )
-
-            # Use the returned indices to filter both the points and the sensor IDs
-            cleaned_pc_np = pc_to_filter_np[kept_indices]
-            cleaned_sids = sids_to_filter[kept_indices]
-
-            # Append the cleaned results to the new lists
-            lidar_pc_list_for_concat.append(cleaned_pc_np)
-            lidar_pc_sids_list_for_concat.append(cleaned_sids)
-
-            if args.vis_filter_static_pc_list:
-                print(f"\nVisualizing filter result for frame {filter_idx}...")
-
-                # Get indices of points that were removed
-                all_indices = np.arange(len(pc_to_filter_np))
-                removed_indices = np.setdiff1d(all_indices, kept_indices)
-
-                # Create a point cloud for the points that were KEPT
-                pcd_kept = pcd_to_filter.select_by_index(kept_indices)
-                pcd_kept.paint_uniform_color([0.0, 0.8, 0.0])  # Green
-
-                # Create a point cloud for the points that were REMOVED
-                pcd_removed = pcd_to_filter.select_by_index(removed_indices)
-                pcd_removed.paint_uniform_color([1.0, 0.0, 0.0])  # Red
-
-                # Draw both point clouds together
-                o3d.visualization.draw_geometries(
-                    [pcd_kept, pcd_removed],
-                    window_name=f"Per-Frame Filter Result - Frame {filter_idx}"
-                )
-
-    else:
-        print("\n--- Skipping per-frame filtering ---")
-        lidar_pc_list_for_concat = lidar_pc_list_for_concat_unfiltered
-        lidar_pc_sids_list_for_concat = lidar_pc_sids_list_for_concat_unfiltered
 
     ###############################################################################################################
     lidar_pc_final_global = np.concatenate(lidar_pc_list_for_concat, axis=0)
@@ -467,8 +571,8 @@ def main(args):
                 sensor_origins.append(T_s_to_ego[:3, 3])
             sensor_origins = np.stack(sensor_origins, axis=0)  # shape (S,3)
 
-            if args.icp_refinement:
-                T_ref_from_k = poses_kiss_icp[i]
+            if args.icp_refinement and poses_kiss_icp is not None:
+                T_ref_from_k = poses_to_transform[i]
                 T_k_from_ref = np.linalg.inv(T_ref_from_k)
                 tranforms_ref_to_k.append(T_k_from_ref)
             else:
@@ -1020,7 +1124,6 @@ def main(args):
             i = i + 1
             continue
 
-
     ################################################################################################################
     ################################################################################################################
 
@@ -1049,8 +1152,13 @@ if __name__ == '__main__':
     parse.add_argument('--pose_error_plot', action='store_true', help='Plot pose error')
 
     ##################################### Use flexcloud transformed point cloud and refined poses ################
-    parse.add_argument('--use_flexcloud', type=int, default=0,
-                        help='A flag indicating whether FlexCloud processing was run (1) or not (0).')
+    parse.add_argument(
+        '--use_flexcloud',
+        type=int,
+        default=0,
+        choices=[0, 1],
+        help="Flag to indicate whether to use FlexCloud processing (1=True, 0=False)."
+    )
 
     ######################################## Filter settings ##########################################
     parse.add_argument('--filter_static_pc_list', action='store_true',
@@ -1064,7 +1172,8 @@ if __name__ == '__main__':
                        help='Show a comparison of kept (green) and removed (red) points after aggregated filtering.')
 
     parse.add_argument('--vis_filter_static_pc_list', action='store_true', help='Enable per-frame advanced voxel filtering before aggregation.')
-    parse.add_argument('--vis_filter_aggregated_static_pc', action='store_true', help='Enable aggregated static pc filter visualisation')
+    parse.add_argument('--vis_filter_aggregated_static_map', action='store_true', help='Enable aggregated static pc filter visualisation')
+    parse.add_argument('--vis_filtered_aggregated_static', action='store_true', help='Enable aggregated static pc filter visualisation')
 
     parse.add_argument('--vis_static_before_combined_dynamic', action='store_true',
                        help='Enable static pc visualization before combined with dynamic points')

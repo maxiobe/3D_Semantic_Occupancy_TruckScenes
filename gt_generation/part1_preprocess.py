@@ -789,7 +789,6 @@ def main(trucksc, indice, truckscenesyaml, args, config):
         gt_relative_poses_arr = np.array(gt_relative_poses_list)  # Shape: (num_frames, 4, 4)
         print(f"Collected {gt_relative_poses_arr.shape[0]} GT relative poses for comparison.")
 
-
     ###############################################################################################
     ######################## Calculate initial guesses ###########################################
     initial_relative_motions = []
@@ -1232,9 +1231,15 @@ def main(trucksc, indice, truckscenesyaml, args, config):
             print("GT relative poses not available for comparison.")
 
     if not args.icp_refinement:
-        print("ICP refinement is OFF. Using unrefined points (in reference ego frame) for aggregation.")
-        source_pc_list_all_frames = unrefined_pc_ego_ref_list
-        source_pc_sids_list_all_frames = unrefined_pc_ego_ref_list_sensor_ids
+        print("ICP refinement is OFF. Using mapmos points (if enabled) or unrefined points (if mapmos unabled) (in reference ego frame) for aggregation.")
+        source_pc_list_all_frames_to_transform = static_points_refined
+        source_pc_list_all_frames = []
+        for index_transform, pc_to_transform in enumerate(source_pc_list_all_frames_to_transform):
+            pose = gt_relative_poses_list[index_transform]
+            transformed_points_ego_ref = transform_points(pc_to_transform, pose)
+            source_pc_list_all_frames.append(transformed_points_ego_ref)
+
+        source_pc_sids_list_all_frames = static_points_refined_sensor_ids
     else:
         print("ICP refinement is ON. Using KISS-ICP refined points for aggregation.")
         source_pc_list_all_frames = refined_lidar_pc_list
@@ -1483,6 +1488,7 @@ def main(trucksc, indice, truckscenesyaml, args, config):
         #lidar_pc_final_global_sensor_ids=lidar_pc_final_global_sensor_ids,
         dict_list=np.array(dict_list, dtype=object),
         poses_kiss_icp=poses_kiss_icp,  # Can be None if ICP was skipped
+        gt_relative_poses_arr=gt_relative_poses_arr,
         # --- Config/Args needed by Part 3 ---
         config=np.array(config, dtype=object),
         #truckscenesyaml=np.array(truckscenesyaml, dtype=object),
