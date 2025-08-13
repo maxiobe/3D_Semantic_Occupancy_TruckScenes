@@ -9,16 +9,22 @@ def main():
         print("Error: Please provide the path to the FlexCloud I/O directory.")
         sys.exit(1)
 
+    ######################### Path reference ###############################
     scene_io_dir = sys.argv[1]
     flexcloud_input_dir = os.path.join(scene_io_dir, "flexcloud_io")
-    # Define paths based on the I/O directory
+
+
+    ########################## Keyframe selection ###########################
+
+    ########################## Config #######################################
     config_path_select_keyframes = "/home/max/Desktop/Masterarbeit/Python/3D_Semantic_Occupancy_TruckScenes/gt_generation/flexcloud/config/select_keyframes.yaml"
-    config_path_pcd_georef = "/home/max/Desktop/Masterarbeit/Python/3D_Semantic_Occupancy_TruckScenes/gt_generation/flexcloud/config/pcd_georef.yaml"
+
+    ################ Path to input files generated in part 1 ################
     pos_dir = os.path.join(flexcloud_input_dir, "gnss_poses")
     odom_path = os.path.join(flexcloud_input_dir, "odom/slam_poses.txt")
     pcd_dir = os.path.join(flexcloud_input_dir, "point_clouds")
     output_dir_keyframes = os.path.join(flexcloud_input_dir, "output_keyframes")
-    pcd_dir_transformed = os.path.join(flexcloud_input_dir, "pcd_transformed")
+
 
     # Initialize the FlexCloud processor
     processor = flexcloud_bindings.FlexCloud()
@@ -34,18 +40,22 @@ def main():
     )
     print("Finished running Keyframe Interpolation...")
 
+
+    ######################################################################################
+    ########################### Georeferencing ###########################################
+
     print("Running Georeferencing...")
-    # NOTE: You will need to adapt the pcd_path for this function.
-    # It might need to point to the `output_dir_keyframes` from the previous step.
-    # This is a placeholder for the logic you need.
-    # For now, we assume it processes the same input PCDs.
-    ref_path_in = os.path.join(output_dir_keyframes, "poseData.txt")
+
+    ########################### Config ################################
+    config_path_pcd_georef = "/home/max/Desktop/Masterarbeit/Python/3D_Semantic_Occupancy_TruckScenes/gt_generation/flexcloud/config/pcd_georef.yaml"
+
+    # ref_path_in = os.path.join(output_dir_keyframes, "poseData.txt") # Output from keyframe interpolation
     ref_path_in = os.path.join(flexcloud_input_dir, "all_gnss_data_poses.txt")
-    slam_path_in = os.path.join(output_dir_keyframes, "kitti_poses.txt")
+    # slam_path_in = os.path.join(output_dir_keyframes, "kitti_poses.txt") # Output from step keyframe interpolation
     slam_path_in = odom_path
 
-    #pcd_path_in = os.path.join(output_dir_keyframes, "000000/cloud.pcd")
-
+    ###################### Input and output of point cloud map ####################
+    pcd_dir_transformed = os.path.join(flexcloud_input_dir, "pcd_transformed")
     pcd_path_in =os.path.join(flexcloud_input_dir, "aggregated_cloud.pcd")
     output_pcd_filepath = os.path.join(pcd_dir_transformed, "refined_map.pcd")
 
