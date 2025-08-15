@@ -16,12 +16,14 @@ SAVE_PATH_GT="/home/max/ssd/Masterarbeit/TruckScenes/trainval/v1.0-trainval/gt/a
 DATA_ROOT="/home/max/ssd/Masterarbeit/TruckScenes/trainval/v1.0-trainval"
 VERSION="v1.0-trainval"
 SPLIT="train"
-START=2
-END=3
+START=60
+END=61
 LOAD_MODE="pointwise"
 
 USE_FLEXCLOUD=0
-
+# Set to 1 for the local, sliding-window map (part3_postprocess_reduced_static.py).
+# Set to 0 for the global map using all frames (part3_postprocess.py).
+USE_LOCAL_STATIC_MAP=01
 # Define the root directory for your Python scripts
 PIPELINE_DIR="/home/max/Desktop/Masterarbeit/Python/3D_Semantic_Occupancy_TruckScenes/gt_generation"
 
@@ -48,38 +50,38 @@ do
     mkdir -p "$SCENE_IO_DIR"
 
     # --- Step 1: Pre-processing with Open3D ---
-    echo "Activating environment: $ENV_PREPROCESS for Part 1..."
-    conda activate "$ENV_PREPROCESS"
-    python "${PIPELINE_DIR}/part1_preprocess.py" \
-        --dataroot "$DATA_ROOT" \
-        --version "$VERSION" \
-        --config_path "$CONFIG_PATH" \
-        --save_path "$SAVE_PATH_GT" \
-        --label_mapping "$LABEL_MAPPING" \
-        --split "$SPLIT" \
-        --idx "$i" \
-        --load_mode "$LOAD_MODE" \
-        --scene_io_dir "$SCENE_IO_DIR" \
-        --icp_refinement \
-        --initial_guess_mode ego_pose \
-        --pose_error_plot \
-        --filter_lidar_intensity \
-        --filter_mode both \
-        --filter_static_pc \
-        --run_mapmos \
-        --vis_aggregated_static_ego_ref_pc \
-        --static_map_keyframes_only \
-        --use_flexcloud "$USE_FLEXCLOUD" \
-        --vis_static_frame_comparison_kiss_refined \
-        #--vis_raw_pc \
+    #echo "Activating environment: $ENV_PREPROCESS for Part 1..."
+    #conda activate "$ENV_PREPROCESS"
+    #python "${PIPELINE_DIR}/part1_preprocess.py" \
+      #  --dataroot "$DATA_ROOT" \
+     #   --version "$VERSION" \
+      #  --config_path "$CONFIG_PATH" \
+      #  --save_path "$SAVE_PATH_GT" \
+      #  --label_mapping "$LABEL_MAPPING" \
+      #  --split "$SPLIT" \
+      #  --idx "$i" \
+      #  --load_mode "$LOAD_MODE" \
+      #  --scene_io_dir "$SCENE_IO_DIR" \
+      #  --filter_mode both \
+      #  --filter_static_pc \
+      #  --initial_guess_mode ego_pose \
+      #  --run_mapmos \
+      #  --vis_aggregated_static_ego_ref_pc \
+      #  --static_map_keyframes_only \
+      #  --use_flexcloud "$USE_FLEXCLOUD" \
+      #  --vis_static_frame_comparison_kiss_refined \
+      #  --filter_lidar_intensity \
+      #  --pose_error_plot \
+      #  --icp_refinement \
         #--vis_static_pc \
+        #--vis_raw_pc \
         #--vis_static_pc_global \
         #--vis_lidar_intensity_filtered \
         #--filter_raw_pc \
         #--vis_aggregated_static_ego_i_pc \
         #--vis_aggregated_static_global_pc \
         #--vis_aggregated_raw_pc_ego_i \
-    conda deactivate
+    #conda deactivate
 
     # --- Step 1b: Create ROS Bag ---
     #echo "--- Preparing to create ROS Bag ---"
@@ -125,23 +127,49 @@ do
         echo "Activating environment: $ENV_POSTPROCESS for Part 3..."
         conda activate "$ENV_POSTPROCESS"
 
-        python "${PIPELINE_DIR}/part3_postprocess.py" \
-            --dataroot "$DATA_ROOT" \
-            --version "$VERSION" \
-            --config_path "$CONFIG_PATH" \
-            --save_path "$SAVE_PATH_GT" \
-            --label_mapping "$LABEL_MAPPING" \
-            --scene_io_dir "$SCENE_IO_DIR" \
-            --icp_refinement \
-            --pose_error_plot \
-            --dynamic_map_keyframes_only \
-            --static_map_keyframes_only \
-            --use_flexcloud "$USE_FLEXCLOUD" \
-            --vis_dyn_ambigious_points \
-            --vis_combined_static_dynamic_pc \
-            --vis_dyn_unreassigned_points \
-            --vis_static_frame_comparison
+        if [ "$USE_LOCAL_STATIC_MAP" -eq 1 ]; then
+            echo "--- Running Part 3 with LOCAL (sliding-window) static map ---"
+            python "${PIPELINE_DIR}/part3_postprocess_reduced_static.py" \
+                --dataroot "$DATA_ROOT" \
+                --version "$VERSION" \
+                --config_path "$CONFIG_PATH" \
+                --save_path "$SAVE_PATH_GT" \
+                --label_mapping "$LABEL_MAPPING" \
+                --scene_io_dir "$SCENE_IO_DIR" \
+                --pose_error_plot \
+                --dynamic_map_keyframes_only \
+                --static_map_keyframes_only \
+                --use_flexcloud "$USE_FLEXCLOUD" \
+                --vis_combined_static_dynamic_pc \
+                --vis_static_frame_comparison \
+                --filter_aggregated_static_map \
+                --filter_static_pc_list \
+                --vis_filtered_aggregated_static
+                #--icp_refinement \
 
+        else
+            echo "--- Running Part 3 with GLOBAL (all frames) static map ---"
+
+            python "${PIPELINE_DIR}/part3_postprocess.py" \
+                --dataroot "$DATA_ROOT" \
+                --version "$VERSION" \
+                --config_path "$CONFIG_PATH" \
+                --save_path "$SAVE_PATH_GT" \
+                --label_mapping "$LABEL_MAPPING" \
+                --scene_io_dir "$SCENE_IO_DIR" \
+                --pose_error_plot \
+                --dynamic_map_keyframes_only \
+                --static_map_keyframes_only \
+                --use_flexcloud "$USE_FLEXCLOUD" \
+                --vis_combined_static_dynamic_pc \
+                --vis_static_frame_comparison \
+                --filter_aggregated_static_map \
+                --filter_static_pc_list\
+                --vis_filtered_aggregated_static \
+                #--icp_refinement \
+                #--vis_dyn_unreassigned_points \
+                #--vis_dyn_ambigious_points \
+        fi
         conda deactivate
     else
         echo "Skipping Part 2 and 3 for scene $i as it was not in the desired split."

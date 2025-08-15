@@ -15,14 +15,14 @@ from mmcv.ops.points_in_boxes import (points_in_boxes_cpu, points_in_boxes_all)
 from pyquaternion import Quaternion
 import matplotlib.pyplot as plt
 from truckscenes.utils.geometry_utils import transform_matrix
-from utils.visualization import visualize_pointcloud_bbox, visualize_pointcloud, visualize_point_cloud_comparison
+from utils.visualization import visualize_pointcloud_bbox, visualize_pointcloud, visualize_point_cloud_comparison, calculate_and_plot_pose_errors
 from utils.pointcloud_processing import denoise_pointcloud, denoise_pointcloud_advanced, get_weather_intensity_filter_mask, integrate_imu_for_relative_motion
 from utils.geometry_utils import transform_points, transform_imu_to_ego
 from utils.constants import *
 from kiss_icp.pipeline import OdometryPipeline
 from mapmos.pipeline import MapMOSPipeline
 from utils.custom_datasets import InMemoryDataset, InMemoryDatasetMapMOS
-from utils.data_utils import save_gnss_to_directory, save_poses_to_kitti_format, save_pcds_to_directory, save_gnss_to_single_file, parse_single_annotation_file
+from utils.data_utils import save_gnss_to_directory, save_poses_to_kitti_format, save_pcds_to_directory, save_gnss_to_single_file, parse_single_annotation_file, save_pointcloud_for_annotation
 
 def main(trucksc, indice, truckscenesyaml, args, config):
     ################ Set device ################################
@@ -150,6 +150,7 @@ def main(trucksc, indice, truckscenesyaml, args, config):
 
     ######################## Looping over the generated groups and save data in a dict_list ############################
     dict_list = []
+    dict_list_for_saving = []
     dict_list_rosbag = []
 
     reference_ego_pose = None
@@ -196,20 +197,21 @@ def main(trucksc, indice, truckscenesyaml, args, config):
 
         ################################# Uncomment if you need to save pointclouds for annotation ###########################
 
-        """if indice in scene_terminal_list:
-            annotation_base = os.path.join(data_root, 'annotation')
-            # Format the filename with leading zeros to maintain order (e.g., 000000.pcd, 000001.pcd)
+        if args.save_sensor_fused_pc:
+            if indice in scene_terminal_list:
+                annotation_base = os.path.join(data_root, 'annotation')
+                # Format the filename with leading zeros to maintain order (e.g., 000000.pcd, 000001.pcd)
 
-            if sample['is_key_frame']:
-                output_pcd_filename = f"{i:06d}_keyframe.pcd"
-                annotation_data_save_path = os.path.join(annotation_base, scene_name, 'pointclouds', output_pcd_filename)
-            else:
-                output_pcd_filename = f"{i:06d}_nonkeyframe.pcd"
-                annotation_data_save_path = os.path.join(annotation_base, scene_name, 'pointclouds', 'nonkeyframes', output_pcd_filename)
+                if sample['is_key_frame']:
+                    output_pcd_filename = f"{i:06d}_keyframe.pcd"
+                    annotation_data_save_path = os.path.join(annotation_base, scene_name, 'pointclouds', output_pcd_filename)
+                else:
+                    output_pcd_filename = f"{i:06d}_nonkeyframe.pcd"
+                    annotation_data_save_path = os.path.join(annotation_base, scene_name, 'pointclouds', 'nonkeyframes', output_pcd_filename)
 
-            # Save the raw fused point cloud before any filtering
-            # We use .points.T to get the (N, features) shape
-            save_pointcloud_for_annotation(sensor_fused_pc.points.T, annotation_data_save_path)"""
+                # Save the raw fused point cloud before any filtering
+                # We use .points.T to get the (N, features) shape
+                save_pointcloud_for_annotation(sensor_fused_pc.points.T, annotation_data_save_path)
 
         ########################################### Get boxes given in dataset ####################################
         # Get original boxes from the dataset
@@ -692,9 +694,28 @@ def main(trucksc, indice, truckscenesyaml, args, config):
             "lidar_pc_for_icp_ego_i": pc_for_icp
         }
 
+        frame_dict_for_saving = {
+            "sample_timestamp": frame_dict["sample_timestamp"],
+            "scene_name": frame_dict["scene_name"],
+            "sample_token": frame_dict["sample_token"],
+            "is_key_frame": frame_dict["is_key_frame"],
+            "converted_object_category": frame_dict["converted_object_category"],
+            "boxes_ego": frame_dict["boxes_ego"],
+            "object_tokens": frame_dict["object_tokens"],
+            "object_points_list": frame_dict["object_points_list"],
+            "object_points_list_sensor_ids": frame_dict["object_points_list_sensor_ids"],
+            "ego_ref_from_ego_i": frame_dict["ego_ref_from_ego_i"],
+            # Ground truth boxes needed by part3
+            "gt_bbox_3d_unmodified": frame_dict["gt_bbox_3d_unmodified"],
+            "gt_bbox_3d_points_in_boxes_cpu_enlarged": frame_dict["gt_bbox_3d_points_in_boxes_cpu_enlarged"],
+            "gt_bbox_3d_overlap_enlarged": frame_dict["gt_bbox_3d_overlap_enlarged"],
+            # Object points are also very large, so we exclude them.
+            # Part 3 re-aggregates them anyway.
+        }
+
         ########################## Save dictionary into a list ###############################
         dict_list.append(frame_dict)
-
+        dict_list_for_saving.append(frame_dict_for_saving)
 
         if args.save_rosbag_data:
             frame_dict_rosbag = {
@@ -714,11 +735,12 @@ def main(trucksc, indice, truckscenesyaml, args, config):
     unrefined_pc_ego_list = [frame_dict['lidar_pc_ego_i'] for frame_dict in dict_list]
     print(f"Extracted {len(unrefined_pc_ego_list)} static point clouds (in ego i frame).")
     unrefined_pc_ego_list_sensor_ids = [frame_dict['lidar_pc_ego_sensor_ids'] for frame_dict in dict_list]
-    pc_ego_combined_draw = np.concatenate(unrefined_pc_ego_list, axis=0)
-    print(f"Pc ego i combined shape: {pc_ego_combined_draw.shape}")
+
 
     ######################## Visualization #################################################
     if args.vis_aggregated_static_ego_i_pc:
+        pc_ego_combined_draw = np.concatenate(unrefined_pc_ego_list, axis=0)
+        print(f"Pc ego i combined shape: {pc_ego_combined_draw.shape}")
         pc_ego_to_draw = o3d.geometry.PointCloud()
         pc_coordinates = pc_ego_combined_draw[:, :3]
         pc_ego_to_draw.points = o3d.utility.Vector3dVector(pc_coordinates)
@@ -728,11 +750,11 @@ def main(trucksc, indice, truckscenesyaml, args, config):
     unrefined_pc_ego_ref_list = [frame_dict['lidar_pc_ego_ref'] for frame_dict in dict_list]
     print(f"Extracted {len(unrefined_pc_ego_ref_list)} static point clouds (in ego ref frame).")
     unrefined_pc_ego_ref_list_sensor_ids = [frame_dict['lidar_pc_ego_sensor_ids'] for frame_dict in dict_list]
-    pc_ego_ref_combined_draw = np.concatenate(unrefined_pc_ego_ref_list, axis=0)
-    print(f"Pc ego ref combined shape: {pc_ego_ref_combined_draw.shape}")
 
     ###################### Visualization ##################################################
     if args.vis_aggregated_static_ego_ref_pc:
+        pc_ego_ref_combined_draw = np.concatenate(unrefined_pc_ego_ref_list, axis=0)
+        print(f"Pc ego ref combined shape: {pc_ego_ref_combined_draw.shape}")
         pc_ego_ref_to_draw = o3d.geometry.PointCloud()
         pc_ego_ref_coordinates = pc_ego_ref_combined_draw[:, :3]
         pc_ego_ref_to_draw.points = o3d.utility.Vector3dVector(pc_ego_ref_coordinates)
@@ -1076,11 +1098,11 @@ def main(trucksc, indice, truckscenesyaml, args, config):
             refined_lidar_pc_list = []
 
             for idx, points_ego in enumerate(
-                    static_points_refined):  # (static_points_mapmos): # (unrefined_pc_ego_list):
+                    static_points_refined):
                 pose = estimated_poses_kiss[idx]
-                print(f"Applying refined pose {idx}: {pose}")
+                #print(f"Applying refined pose {idx}: {pose}")
 
-                print(f"Points ego shape: {points_ego.shape}")
+                #print(f"Points ego shape: {points_ego.shape}")
 
                 points_xyz = points_ego[:, :3]
                 points_homo = np.hstack((points_xyz, np.ones((points_xyz.shape[0], 1))))
@@ -1092,136 +1114,17 @@ def main(trucksc, indice, truckscenesyaml, args, config):
 
                 refined_lidar_pc_list.append(points_transformed)
 
-            """for idx, points_semantic_ego in enumerate(unrefined_sem_pc_ego_list):
-                pose = estimated_poses_kiss[idx]
-                print(f"Applying refined pose {idx}: {pose}")
-
-                print(f"Points semantic ego shape: {points_semantic_ego.shape}")
-                points_xyz = points_semantic_ego[:, :3]
-                points_homo = np.hstack((points_xyz, np.ones((points_xyz.shape[0], 1))))
-                points_transformed = (pose @ points_homo.T)[:3, :].T
-
-                if points_semantic_ego.shape[0] > 3:
-                    other_features = points_semantic_ego[:, 3:]
-                    points_transformed = np.hstack((points_transformed, other_features))
-
-                refined_lidar_pc_with_semantic_list.append(points_transformed)"""
-
         # --- 4. Compare KISS-ICP Poses with Ground Truth ---
         if 'gt_relative_poses_arr' in locals() and gt_relative_poses_arr.shape[0] > 0:
             if poses_kiss_icp.shape[0] == gt_relative_poses_arr.shape[0]:
-                print("\n--- Comparing KISS-ICP Poses with Ground Truth Poses ---")
-                trans_errors = []
-                rot_errors_rad = []
-                trans_errors_x = []
-                trans_errors_y = []
-                trans_errors_z = []
-
-                kiss_relative_poses_arr = poses_kiss_icp
-
-                for k_idx in range(kiss_relative_poses_arr.shape[0]):
-                    pose_kiss_k = kiss_relative_poses_arr[k_idx]  # Pose of frame k in KISS-ICP's frame 0 system
-                    pose_gt_k = gt_relative_poses_arr[k_idx]  # Pose of frame k in dataset's frame 0 system
-
-                    # Translational error
-                    t_kiss = pose_kiss_k[:3, 3]
-                    t_gt = pose_gt_k[:3, 3]
-
-                    # Translational error vector (GT - Estimated)
-                    t_error_vec = t_gt - t_kiss
-                    trans_errors_x.append(t_error_vec[0])
-                    trans_errors_y.append(t_error_vec[1])
-                    trans_errors_z.append(t_error_vec[2])
-
-                    # Overall translational error
-                    trans_error = np.linalg.norm(t_error_vec)  # Same as np.linalg.norm(t_gt - t_kiss)
-                    trans_errors.append(trans_error)
-
-                    # Rotational error
-                    R_kiss = pose_kiss_k[:3, :3]
-                    R_gt = pose_gt_k[:3, :3]
-
-                    # Relative rotation: R_error = inv(R_kiss) @ R_gt
-                    R_error = R_kiss.T @ R_gt
-
-                    # Angle from rotation matrix trace
-                    trace_val = np.trace(R_error)
-                    clipped_arg = np.clip((trace_val - 1.0) / 2.0, -1.0, 1.0)
-                    rot_error_rad = np.arccos(clipped_arg)
-                    rot_errors_rad.append(rot_error_rad)
-
-                avg_trans_error = np.mean(trans_errors)
-                median_trans_error = np.median(trans_errors)
-                avg_rot_error_deg = np.mean(np.degrees(rot_errors_rad))
-                median_rot_error_deg = np.median(np.degrees(rot_errors_rad))
-
-                # Calculate statistics for component-wise errors
-                mae_trans_error_x = np.mean(np.abs(trans_errors_x))
-                mae_trans_error_y = np.mean(np.abs(trans_errors_y))
-                mae_trans_error_z = np.mean(np.abs(trans_errors_z))
-
-                mean_trans_error_x = np.mean(trans_errors_x)
-                mean_trans_error_y = np.mean(trans_errors_y)
-                mean_trans_error_z = np.mean(trans_errors_z)
-
-                print(f"Sequence: {scene_name}")
-                print(f"  Average Translational Error : {avg_trans_error:.4f} m")
-                print(f"  Median Translational Error  : {median_trans_error:.4f} m")
-                print(f"  Average Rotational Error    : {avg_rot_error_deg:.4f} degrees")
-                print(f"  Median Rotational Error     : {median_rot_error_deg:.4f} degrees")
-                print(f"  MAE X: {mae_trans_error_x:.4f} m (Mean X Bias: {mean_trans_error_x:+.4f} m)")
-                print(f"  MAE Y: {mae_trans_error_y:.4f} m (Mean Y Bias: {mean_trans_error_y:+.4f} m)")
-                print(f"  MAE Z: {mae_trans_error_z:.4f} m (Mean Z Bias: {mean_trans_error_z:+.4f} m)")
-
-                fig, axs = plt.subplots(2, 2, figsize=(17, 10))  # Adjusted figsize for 2x2
-                fig.suptitle(f'Scene {scene_name}: KISS-ICP vs GT Relative Pose Errors', fontsize=16)
-
-                # Top-left: Overall Translational Error
-                axs[0, 0].plot(trans_errors, label="Overall Trans. Error")
-                axs[0, 0].set_title('Overall Translational Error')
-                axs[0, 0].set_ylabel('Error (m)')
-                axs[0, 0].grid(True)
-                axs[0, 0].legend()
-                axs[0, 0].set_xlabel('Frame Index')
-
-                # Top-right: Overall Rotational Error
-                axs[0, 1].plot(np.degrees(rot_errors_rad), label="Overall Rot. Error")
-                axs[0, 1].set_title('Overall Rotational Error')
-                axs[0, 1].set_ylabel('Error (degrees)')
-                axs[0, 1].grid(True)
-                axs[0, 1].legend()
-                axs[0, 1].set_xlabel('Frame Index')
-
-                # Bottom-left: X and Y Translational Errors
-                axs[1, 0].plot(trans_errors_x, label="X Error (GT - Est)", alpha=0.9)
-                axs[1, 0].plot(trans_errors_y, label="Y Error (GT - Est)", alpha=0.9)
-                axs[1, 0].axhline(0, color='black', linestyle='--', linewidth=0.7, label="Zero Error")
-                axs[1, 0].set_title('X & Y Translational Component Errors')
-                axs[1, 0].set_xlabel('Frame Index')
-                axs[1, 0].set_ylabel('Error (m)')
-                axs[1, 0].grid(True)
-                axs[1, 0].legend()
-
-                # Bottom-right: Z Translational Error
-                axs[1, 1].plot(trans_errors_z, label="Z Error (GT - Est)")
-                axs[1, 1].axhline(0, color='black', linestyle='--', linewidth=0.7, label="Zero Error")
-                axs[1, 1].set_title('Z Translational Component Error')
-                axs[1, 1].set_xlabel('Frame Index')
-                axs[1, 1].set_ylabel('Error (m)')
-                axs[1, 1].grid(True)
-                axs[1, 1].legend()
-
-                plt.tight_layout(rect=[0, 0, 1, 0.95])  # Adjust layout to make space for subtitle
-
-                plot_save_dir = Path(args.save_path) / scene_name / "kiss_icp_logs"
-                plot_save_dir.mkdir(parents=True, exist_ok=True)
-                plot_filename = plot_save_dir / f"errors_scene_{scene_name}.png"
-                plt.savefig(plot_filename)
-                print(f"Saved pose error plot to {plot_filename}")
-
-                if args.pose_error_plot:
-                    plt.show()
-                plt.close(fig)
+                calculate_and_plot_pose_errors(
+                    poses_estimated=poses_kiss_icp,
+                    poses_reference=gt_relative_poses_arr,
+                    title_prefix="KISS-ICP vs GT",
+                    scene_name=scene_name,
+                    save_dir=args.save_path,
+                    show_plot=args.pose_error_plot
+                )
 
             else:
                 print(f"Warning: Number of KISS-ICP poses ({poses_kiss_icp.shape[0]}) "
@@ -1246,69 +1149,59 @@ def main(trucksc, indice, truckscenesyaml, args, config):
         source_pc_sids_list_all_frames = static_points_refined_sensor_ids
 
     ################################################################################################################
-    ################################################################################################################
-    #################################### Filtering based on if only keyframes should be used ###########################
-    print(f"Static map aggregation: --static_map_keyframes_only is {args.static_map_keyframes_only}")
-
-    lidar_pc_list_for_concat = []
-    lidar_pc_sids_list_for_concat = []
-
-    for idx, frame_info in enumerate(dict_list):
-        is_key = frame_info['is_key_frame']
-        include_in_static_map = True
-        if args.static_map_keyframes_only and not is_key:
-            include_in_static_map = False
-
-        if include_in_static_map:
-            print(f"  Including frame {idx} (Keyframe: {is_key}) in static map aggregation.")
-            if idx < len(source_pc_list_all_frames) and source_pc_list_all_frames[idx].shape[0] > 0:
-                lidar_pc_list_for_concat.append(source_pc_list_all_frames[idx])
-                if idx < len(source_pc_sids_list_all_frames) and source_pc_sids_list_all_frames[idx].shape[0] > 0:
-                    lidar_pc_sids_list_for_concat.append(source_pc_sids_list_all_frames[idx])
-                elif source_pc_list_all_frames[idx].shape[
-                    0] > 0:
-                    print(
-                        f"Warning: Frame {idx} has {source_pc_list_all_frames[idx].shape[0]} static points but missing/empty SIDs.")
-        else:
-            print(
-                f"  Skipping frame {idx} (Keyframe: {is_key}) for static map aggregation due to --static_map_keyframes_only.")
-
-    ################################### Concatenating the static point list ##############################################
-
-    if lidar_pc_list_for_concat:
-        print(f"Concatenating pc from {len(lidar_pc_list_for_concat)} frames")
-        lidar_pc_final_global = np.concatenate(lidar_pc_list_for_concat, axis=0)
-        print(f"Concatenated refined static global points. Shape: {lidar_pc_final_global.shape}")
-    else:
-        sys.exit()
-
-    if lidar_pc_sids_list_for_concat:
-        print(f"Concatenating pc sensor ids from {len(lidar_pc_sids_list_for_concat)} frames")
-        lidar_pc_final_global_sensor_ids = np.concatenate(lidar_pc_sids_list_for_concat, axis=0)
-        print(
-            f"Concatenated refined static global point sensor ids. Shape: {lidar_pc_final_global_sensor_ids.shape}")
-    else:
-        sys.exit()
-
-    assert lidar_pc_final_global.shape[0] == lidar_pc_final_global_sensor_ids.shape[0]
-
-    ################################## Visualization #############################################################
-    if args.vis_aggregated_static_kiss_refined:
-        visualize_pointcloud(lidar_pc_final_global, title=f"Aggregated Refined Static PC (Global) - Scene {scene_name}")
-    ####################################################################################################################
-
-    ################################## Visualization of 2 frames to see if aligned #####################################
-    if args.vis_static_frame_comparison_kiss_refined:
-        visualize_point_cloud_comparison(
-            point_cloud_list=lidar_pc_list_for_concat,
-            frame_indices=[1, 25],
-            scene_name="KISS Refined Alignment"
-        )
-    ###############################################################################################################
 
     #################################### Saving data for FlexCloud ################################################
     if args.use_flexcloud:
+        if not args.icp_refinement:
+            print("Data for flexcloud cannot be saved as no ICP refinement is enabled.")
+            sys.exit()
         print("Saving data for flexcloud....")
+
+        #################################### Filtering based on if only keyframes should be used ###########################
+        print(f"Static map aggregation: --static_map_keyframes_only is {args.static_map_keyframes_only}")
+
+        lidar_pc_list_for_concat = []
+        lidar_pc_sids_list_for_concat = []
+
+        for idx, frame_info in enumerate(dict_list):
+            is_key = frame_info['is_key_frame']
+            include_in_static_map = True
+            if args.static_map_keyframes_only and not is_key:
+                include_in_static_map = False
+
+            if include_in_static_map:
+                print(f"  Including frame {idx} (Keyframe: {is_key}) in static map aggregation.")
+                if idx < len(source_pc_list_all_frames) and source_pc_list_all_frames[idx].shape[0] > 0:
+                    lidar_pc_list_for_concat.append(source_pc_list_all_frames[idx])
+                    if idx < len(source_pc_sids_list_all_frames) and source_pc_sids_list_all_frames[idx].shape[0] > 0:
+                        lidar_pc_sids_list_for_concat.append(source_pc_sids_list_all_frames[idx])
+                    elif source_pc_list_all_frames[idx].shape[
+                        0] > 0:
+                        print(
+                            f"Warning: Frame {idx} has {source_pc_list_all_frames[idx].shape[0]} static points but missing/empty SIDs.")
+            else:
+                print(
+                    f"  Skipping frame {idx} (Keyframe: {is_key}) for static map aggregation due to --static_map_keyframes_only.")
+
+        ################################### Concatenating the static point list ##############################################
+
+        if lidar_pc_list_for_concat:
+            print(f"Concatenating pc from {len(lidar_pc_list_for_concat)} frames")
+            lidar_pc_final_global = np.concatenate(lidar_pc_list_for_concat, axis=0)
+            print(f"Concatenated refined static global points. Shape: {lidar_pc_final_global.shape}")
+        else:
+            sys.exit()
+
+        if lidar_pc_sids_list_for_concat:
+            print(f"Concatenating pc sensor ids from {len(lidar_pc_sids_list_for_concat)} frames")
+            lidar_pc_final_global_sensor_ids = np.concatenate(lidar_pc_sids_list_for_concat, axis=0)
+            print(
+                f"Concatenated refined static global point sensor ids. Shape: {lidar_pc_final_global_sensor_ids.shape}")
+        else:
+            sys.exit()
+
+        assert lidar_pc_final_global.shape[0] == lidar_pc_final_global_sensor_ids.shape[0]
+
         io_dir = args.scene_io_dir
         save_dir_flexcloud = os.path.join(args.scene_io_dir, "flexcloud_io")
         pos_dir = os.path.join(save_dir_flexcloud, "gnss_poses")
@@ -1343,7 +1236,7 @@ def main(trucksc, indice, truckscenesyaml, args, config):
         gnss_data_save = []
         # Define a constant, low standard deviation for all points
         std_dev_placeholder = np.array([0.1, 0.1, 0.1])
-        for frame_dict in dict_list:
+        for dict_idx, frame_dict in enumerate(dict_list):
             # 1. Get the full 4x4 transformation matrix
             #transform_matrix_global_from_ego = frame_dict['global_from_ego_i']
 
@@ -1478,7 +1371,7 @@ def main(trucksc, indice, truckscenesyaml, args, config):
     context_file_path = os.path.join(args.scene_io_dir, "preprocessed_data.npz")
     print(f"Saving general data dict to {context_file_path}")
 
-    np.savez_compressed(
+    """np.savez_compressed(
         context_file_path,
         lidar_pc_list_for_concat=np.array(lidar_pc_list_for_concat, dtype=object),
         lidar_pc_sids_list_for_concat=np.array(lidar_pc_sids_list_for_concat, dtype=object),
@@ -1508,6 +1401,37 @@ def main(trucksc, indice, truckscenesyaml, args, config):
         cameras=np.array(cameras, dtype=object),
         sensor_max_ranges_arr=sensor_max_ranges_arr,
         self_range=np.array(self_range, dtype=object)
+    )"""
+
+    np.savez_compressed(
+        context_file_path,
+
+        # --- Core Data Arrays Needed by Part 3 ---
+        # The list of lean dictionaries (metadata only)
+        dict_list=np.array(dict_list_for_saving, dtype=object),
+        # The two lists of cleaned, per-frame static points and their sensor IDs
+        static_points_refined=np.array(static_points_refined, dtype=object),
+        static_points_refined_sensor_ids=np.array(static_points_refined_sensor_ids, dtype=object),
+
+        # --- Pose Information ---
+        poses_kiss_icp=poses_kiss_icp,  # Can be None
+        gt_relative_poses_arr=gt_relative_poses_arr,
+
+        # --- Config & Metadata (small, essential) ---
+        config=np.array(config, dtype=object),
+        category_name_to_learning_id=np.array(category_name_to_learning_id, dtype=object),
+        learning_id_to_name=np.array(learning_id_to_name, dtype=object),
+        pc_range=pc_range,
+        voxel_size=voxel_size,
+        occ_size=occ_size,
+        save_path=save_path,
+        scene_name=scene_name,
+        FREE_LEARNING_INDEX=FREE_LEARNING_INDEX,
+        BACKGROUND_LEARNING_INDEX=BACKGROUND_LEARNING_INDEX,
+        sensors=sensors,
+        cameras=cameras,
+        sensor_max_ranges_arr=sensor_max_ranges_arr,
+        self_range=self_range
     )
 
     print("Finished saving general data dict")
@@ -1599,6 +1523,8 @@ if __name__ == '__main__':
         choices=[0, 1],
         help="Flag to indicate whether to use FlexCloud processing (1=True, 0=False)."
     )
+    parse.add_argument('--save_pointcloud_flexcloud', action='store_true', help='Save aggregated pointcloud for flexcloud')
+    parse.add_argument('--save_sensor_fused_pc', action='store_true', help='Save sensor fused pc')
 
 
     args = parse.parse_args()
