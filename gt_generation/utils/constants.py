@@ -1,11 +1,7 @@
-from pathlib import Path
-
 # Constants for voxel states matching your usage
 STATE_UNOBSERVED = 0
 STATE_FREE = 1
 STATE_OCCUPIED = 2
-
-weights_path_mapmos = Path("/home/max/Desktop/Masterarbeit/Python/MapMOS_full/mapmos.ckpt")
 
 CLASS_COLOR_MAP = {
     0: [0.6, 0.6, 0.6],  # noise - gray

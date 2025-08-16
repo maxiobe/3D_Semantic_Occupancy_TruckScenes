@@ -5,139 +5,6 @@ from copy import deepcopy
 from scipy.spatial.transform import Rotation
 from collections import defaultdict
 
-# Function to perform poisson surface reconstruction on a given point cloud and returns a mesh representation of the point cloud, along with vertex info
-# Inputs pcd: input point cloud,
-# depth: parameter to control resolution of mesh. Higher depth results in a more detailed mesh but requires more computation
-# n_threads: Number of threads for parallel processing
-# min_density: threshold for removing low-density vertices from generated mesh. Used to clean up noisy or sparse areas
-def run_poisson(pcd, depth, n_threads, min_density=None):
-    # creates triangular mesh form pcd using poisson surface reconstruction
-    mesh, densities = o3d.geometry.TriangleMesh.create_from_point_cloud_poisson(
-        pcd, depth=depth, n_threads=n_threads
-    )
-    # returns mesh and densities: list of density values corresponding to each vertex in the mesh. Density indicates how well a vertex is supported by underlying points
-
-    # Post-process the mesh
-    # Purpose: to clean up the mesh by removing low-density vertices (e.g. noise or poorly supported areas)
-    if min_density:
-        vertices_to_remove = densities < np.quantile(densities, min_density)  # min_density should be between 0 and 1
-        mesh.remove_vertices_by_mask(vertices_to_remove)  # removes vertices where density is below threshold
-    mesh.compute_vertex_normals()  # computes the normals of the vertices
-
-    return mesh, densities
-
-
-# Function that creates a 3D mesh from a given point cloud or a buffer of points
-# Inputs buffer: a list of point clouds that are combined if no original is given
-# depth: resolution for poisson surface reconstruction
-# n_threads: Number of threads for parallel processing
-# min_density: Optional threshold for removing low-density vertices
-# point_cloud_original: provides a preprocessed point cloud, if given buffer is ignored
-def create_mesh_from_map(buffer, depth, n_threads, min_density=None, point_cloud_original=None):
-    if point_cloud_original is None:
-        pcd = buffer_to_pointcloud(
-            buffer)  # Calls buffer_to_pointcloud(buffer) to create a combined point cloud from the list of smaller point clouds
-    else:
-        pcd = point_cloud_original  # Uses the given point cloud directly
-
-    return run_poisson(pcd, depth, n_threads, min_density)  # calls run_poisson function to generate mesh
-
-
-# Function to combine multiple point clouds from a list (buffer) into a single point cloud and optionally estimating normals in the resulting point cloud
-# Input: buffer: a list of individual point clouds (each being an instance of open3d.geometry.PointCloud)
-# compute_normals: boolean flag that if set to True estimates normals of the final point cloud
-def buffer_to_pointcloud(buffer, compute_normals=False):
-    pcd = o3d.geometry.PointCloud()  # Initialize empty point cloud object using Open3d
-    for cloud in buffer:
-        pcd += cloud  # combine each point cloud with current point cloud object
-    if compute_normals:
-        pcd.estimate_normals()  # estimate normals for each point in the combined point cloud
-
-    return pcd
-
-
-# Function to preprocess a given point cloud by estimating and orienting the normals of each point
-# Input: pcd: input point cloud
-# max_nn: maximum number of nearest neighbors to use when estimating normals with default 20
-# normals: boolean flag whether to estimate normals
-def preprocess_cloud(
-        pcd,
-        max_nn=20,
-        normals=None,
-):
-    cloud = deepcopy(
-        pcd)  # create a deep copy of the input point cloud to ensure that original point cloud is not modified
-    if normals:
-        params = o3d.geometry.KDTreeSearchParamKNN(max_nn)
-        cloud.estimate_normals(params)  # estimate normals based on nearest max_nn points
-        cloud.orient_normals_towards_camera_location()  # orients all computed normals to point towards the camera location to get consistent normal direction for visualization and mesh generation
-
-    return cloud
-
-
-# Wrapper function that calls preprocess_cloud function with parameters derived from a config file
-# Input: pcd: input point cloud
-# config: Dictionary containing all configuration parameters loaded from a YAML file
-def preprocess(pcd, config):
-    return preprocess_cloud(
-        pcd,
-        config['max_nn'],
-        normals=True
-    )
-
-
-def denoise_near_points_dbscan(
-        pcd: o3d.geometry.PointCloud,
-        config: dict
-) -> Tuple[o3d.geometry.PointCloud, np.ndarray]:
-    """
-    Applies a targeted DBSCAN filter only to near, non-ground points.
-    """
-    initial_indices = np.arange(len(pcd.points))
-    if len(initial_indices) < 100:  # Safety check
-        return pcd, initial_indices
-
-    # Step 1: Segment and Protect Ground Points
-    plane_model, ground_indices = pcd.segment_plane(
-        distance_threshold=config.get('ransac_dist_threshold', 0.30),
-        ransac_n=3,
-        num_iterations=100
-    )
-
-    # Step 2: Separate Non-Ground points into Near and Far
-    non_ground_indices = np.setdiff1d(initial_indices, ground_indices)
-    non_ground_pcd = pcd.select_by_index(non_ground_indices)
-    points = np.asarray(non_ground_pcd.points)
-    distances = np.linalg.norm(points, axis=1)
-    distance_threshold = config.get('ransac_filter_distance_threshold', 30.0)
-    near_mask_relative = distances < distance_threshold
-
-    near_indices_original = non_ground_indices[near_mask_relative]
-    far_indices_original = non_ground_indices[~near_mask_relative]
-    near_pcd = pcd.select_by_index(near_indices_original)
-
-    # Step 3: Aggressively Filter ONLY NEAR points with DBSCAN
-    kept_near_indices = np.array([], dtype=int)
-    if len(near_pcd.points) > 0:
-        labels = np.array(near_pcd.cluster_dbscan(
-            eps=config.get('dbscan_eps', 0.6),
-            min_points=config.get('dbscan_min_points', 15)
-        ))
-        min_cluster_size = config.get('dbscan_min_cluster_size', 25)
-        unique_labels, counts = np.unique(labels, return_counts=True)
-        significant_labels = unique_labels[(counts >= min_cluster_size) & (unique_labels != -1)]
-        dbscan_keep_mask = np.isin(labels, significant_labels)
-        kept_near_indices = near_indices_original[dbscan_keep_mask]
-
-    # Step 4: Recombine All Kept Points
-    final_kept_indices = np.union1d(ground_indices, kept_near_indices)
-    final_kept_indices = np.union1d(final_kept_indices, far_indices_original)
-
-    final_pcd = pcd.select_by_index(final_kept_indices.astype(int))
-
-    return final_pcd, final_kept_indices
-
-
 def denoise_near_points_voxel(
         pcd: o3d.geometry.PointCloud,
         config: dict
@@ -154,11 +21,9 @@ def denoise_near_points_voxel(
     if len(initial_indices) < 100:  # Safety check
         return pcd, initial_indices
 
-    print("Applying selective near-field VOXEL filtering...")
-
     # --- Step 1: Segment and Protect Ground Points ---
     plane_model, ground_indices = pcd.segment_plane(
-        distance_threshold=config.get('ransac_dist_threshold', 0.4),
+        distance_threshold=config['ransac_dist_threshold'],
         ransac_n=3,
         num_iterations=100
     )
@@ -169,7 +34,7 @@ def denoise_near_points_voxel(
 
     points = np.asarray(non_ground_pcd.points)
     distances = np.linalg.norm(points, axis=1)
-    distance_threshold = config.get('ransac_filter_distance_threshold', 30.0)
+    distance_threshold = config['voxel_filter_distance_threshold']
 
     near_mask_relative = distances < distance_threshold
     near_indices_original = non_ground_indices[near_mask_relative]
@@ -180,7 +45,7 @@ def denoise_near_points_voxel(
     # --- Step 3: Filter ONLY NEAR points with Voxel Neighborhood Density ---
     kept_near_indices = np.array([], dtype=int)
     if len(near_pcd.points) > 0:
-        print(f"  -> Filtering {len(near_pcd.points)} near points with Voxel method...")
+        #print(f"  -> Filtering {len(near_pcd.points)} near points with Voxel method...")
 
         voxel_size = config.get('voxel_filter_size', 0.4)
         voxel_grid = o3d.geometry.VoxelGrid.create_from_point_cloud(near_pcd, voxel_size=voxel_size)
@@ -193,8 +58,8 @@ def denoise_near_points_voxel(
             pcd_centers = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(voxel_centers))
             kdtree = o3d.geometry.KDTreeFlann(pcd_centers)
 
-            search_radius = voxel_size * config.get('voxel_search_radius_multiplier', 5.0)
-            neighborhood_threshold = config.get('voxel_neighborhood_threshold', 15)
+            search_radius = voxel_size * config['voxel_search_radius_multiplier']
+            neighborhood_threshold = config['voxel_neighborhood_threshold']
 
             valid_voxel_indices_relative = [
                 i for i, center in enumerate(voxel_centers)
@@ -222,7 +87,7 @@ def denoise_near_points_voxel(
 
     final_pcd = pcd.select_by_index(final_kept_indices.astype(int))
 
-    print(f"Selective filtering complete. Final point count: {len(final_pcd.points)}")
+    #print(f"Selective filtering complete. Final point count: {len(final_pcd.points)}")
     return final_pcd, final_kept_indices
 
 
@@ -468,7 +333,7 @@ def get_weather_intensity_filter_mask(
         distance_thresh: float,
         keep_ground_points: bool = True,
         ground_z_min: float = -2.5,
-        ground_z_max: float = -1.0
+        ground_z_max: float = 1.0
 ) -> np.ndarray:
     """
     Calculates a boolean mask for lidar intensity filtering in bad weather,

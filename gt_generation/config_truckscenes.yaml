@@ -1,12 +1,7 @@
-# Parameters for mesh generation:
-'depth': 11 # range between 8 - 11, Higher means more detail but more computation
-'min_density': 0.01  # range between 0.01 - 0.05 # Lower values keep more detail but may introduce noise
-'n_threads': -1 # otherwise 8
-'downsample': False
-
 'max_nn': 20
 
-# Voxel parameters
+##################################### General ###########################################
+# Voxel parameters for saving the occupancy grids
 'voxel_size': 0.2 #0.2 #0.4 # 0.5
 #'occ_size': [200, 200, 16]
 'occ_size': [750, 750, 50]
@@ -18,48 +13,143 @@
 'pc_range': [-75, -75, -5, 75, 75, 15]
 #'pc_range': [-150, -150, -5, 150, 150, 15]
 
-# Filtering parameters
+# Definition of lidar sensors to be used for aggregation
+# sensors: ['LIDAR_LEFT']
+# sensors: ['LIDAR_RIGHT']
+# sensors: ['LIDAR_LEFT', 'LIDAR_RIGHT']
+sensors: ['LIDAR_LEFT', 'LIDAR_RIGHT', 'LIDAR_TOP_FRONT', 'LIDAR_TOP_LEFT', 'LIDAR_TOP_RIGHT', 'LIDAR_REAR']
+
+# Parameters for camera visibility
+cameras: ['CAMERA_LEFT_FRONT', 'CAMERA_RIGHT_FRONT', 'CAMERA_LEFT_BACK', 'CAMERA_RIGHT_BACK']
+'camera_ray_depth_max': 100
+
+# Definition of max time difference to create a sample
+max_time_diff: 90000
+
+###################################### Script 1 #####################################
+# Scenes with manual annotations
+manual_annotation_scenes:
+  v1.0-trainval: [4, 68, 69, 70, 203, 205, 206, 241, 272, 273, 423, 492, 597]
+  v1.0-test: [3, 114, 115, 116]
+  v1.0-mini: [5]
+
+# sensor range for visibility mask
+lidar_sensor_max_ranges:
+  LIDAR_LEFT: 200
+  LIDAR_RIGHT: 200
+  LIDAR_TOP_FRONT: 35
+  LIDAR_TOP_LEFT: 35
+  LIDAR_TOP_RIGHT: 35
+  LIDAR_REAR: 35
+
+# Parameters for enlargement of bounding boxes
+bbox_enlarge_percentage_factor: 1.10
+bbox_enlarge_max_increase_m: 0.5
+
+# Parameters for max enlargement of bounding boxes
+bbox_max_enlarge_percentage_factor: 1.15
+bbox_max_enlarge_fixed_increase_m: 0.3
+
+bbox_special_width_scales:
+  vehicle.car: 1.20
+  vehicle.truck: 1.35
+
+# Filtering parameters for static pc
 distance_split: true        # Set to true to enable the two-pass, distance-based filtering.
 filter_distance_threshold: 30.0        # Split distance (meters) between 'near' and 'far' points.
 
-# Filtering statistical outlier removal:
+# Filtering statistical outlier removal for static pc
 sor_nb_neighbors: 20
 sor_std_ratio: 2.0
 sor_std_ratio_far: 3.0
-# Filtering radius outlier removal:
+# Filtering radius outlier removal for static pc
 ror_nb_points: 5
 ror_radius: 0.5
 ror_radius_far: 0.5
-
-# Ransac ground plane parameters
-'ransac_dist_threshold': 0.40
-'ransac_filter_distance_threshold': 30.0
-
-# For single point cloud
-voxel_filter_size: 0.4                     # Size of each voxel (meters)
-voxel_search_radius_multiplier: 5.0        # Search radius = multiplier * voxel_size
-voxel_neighborhood_threshold: 15
-
-# For aggregated point cloud
-voxel_filter_size_aggregated: 0.2
-voxel_search_radius_multiplier_aggregated: 5.0
-voxel_neighborhood_threshold_aggregated: 7
-
-# Ground Plane Preservation
-'ground_z_min_threshold': -3.0
-'ground_z_max_threshold': 0.2
 
 # Parameters for lidar intensity filtering
 'intensity_threshold': 0
 'distance_intensity_threshold': 30
 
-# Aggregate scans over different sensors
-# sensors: ['LIDAR_LEFT']
-# sensors: ['LIDAR_RIGHT']
-# sensors: ['LIDAR_LEFT', 'LIDAR_RIGHT']
-sensors: ['LIDAR_LEFT', 'LIDAR_RIGHT', 'LIDAR_TOP_FRONT', 'LIDAR_TOP_LEFT', 'LIDAR_TOP_RIGHT', 'LIDAR_REAR']
-cameras: ['CAMERA_LEFT_FRONT', 'CAMERA_RIGHT_FRONT', 'CAMERA_LEFT_BACK', 'CAMERA_RIGHT_BACK']
-max_time_diff: 90000
+# Parameters for ground Plane Preservation for filtering
+'ground_z_min_threshold': -3.0
+'ground_z_max_threshold': 0.2
 
-# Parameters for camera visibility
-'camera_ray_depth_max': 100
+# ICP point cloud generation Parameters
+moving_object_velocity_threshold_ms: 0.2
+
+# MapMOS weight path
+weights_path_mapmos: "/home/max/Desktop/Masterarbeit/Python/MapMOS_full/mapmos.ckpt"
+
+# Kiss-ICP
+kiss_icp_config_path: "kiss_config.yaml"
+
+# Data saving of gnss poses for FlexCloud if enabled
+flexcloud_gnss_std_dev_placeholder: [0.1, 0.1, 0.1]
+
+# Rosbag data saving if enabled
+rosbag_imu_frequency_hz: 100
+
+###################################### Script 2 ########################################
+# FlexCloud config
+config_path_select_keyframes: "/home/max/Desktop/Masterarbeit/Python/3D_Semantic_Occupancy_TruckScenes/gt_generation/flexcloud/config/select_keyframes.yaml"
+config_path_pcd_georef: "/home/max/Desktop/Masterarbeit/Python/3D_Semantic_Occupancy_TruckScenes/gt_generation/flexcloud/config/pcd_georef.yaml"
+
+
+##################################### Script 3 ########################################
+# Ransac ground plane parameters for filtering
+'ransac_dist_threshold': 0.40
+'ransac_num_iterations': 1000
+
+# Filtering parameters for single point cloud
+voxel_filter_size: 0.4                     # Size of each voxel (meters)
+voxel_search_radius_multiplier: 5.0        # Search radius = multiplier * voxel_size
+voxel_neighborhood_threshold: 15
+
+'voxel_filter_distance_threshold': 30.0
+
+# Filtering parameters for aggregated point cloud
+voxel_filter_size_aggregated: 0.2
+voxel_search_radius_multiplier_aggregated: 5.0
+voxel_neighborhood_threshold_aggregated: 7
+
+# Parameters for aggregation of dynamic points (class based threshold parameters defined in part3_preprocess (CLASS_BASED_THRESHOLDS))
+'volume_ratio_tolerance': 1.05
+'dim_ratio_tolerance': 1.05
+'z_tolerance': 0.3
+
+# Parameters for refinement of overlapping boxes
+refinement_high_overlap_threshold: 0.80
+refinement_truck_hitch_height: 1.20
+
+# Parameter if only some keyframes should be used to for static map
+window_size_keyframe_only_aggregation: 5 # if parameter enabled to only use keyframes for static map
+window_size_all: 5 # if all frames used for static map aggregation
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

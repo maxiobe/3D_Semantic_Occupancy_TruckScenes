@@ -3,6 +3,7 @@ import sys
 import numpy as np
 import open3d as o3d
 import torch
+import json
 import time
 from tqdm import tqdm
 from truckscenes import TruckScenes
@@ -10,7 +11,7 @@ from scipy.spatial.transform import Rotation
 from collections import defaultdict
 from utils.visualization import visualize_pointcloud, visualize_pointcloud_bbox, visualize_occupancy_o3d, \
     calculate_and_plot_pose_errors, visualize_point_cloud_comparison
-from utils.pointcloud_processing import denoise_pointcloud, denoise_near_points_dbscan, denoise_near_points_voxel
+from utils.pointcloud_processing import denoise_pointcloud, denoise_near_points_voxel
 from truckscenes.utils.geometry_utils import transform_matrix
 from mmcv.ops.points_in_boxes import (points_in_boxes_cpu, points_in_boxes_all)
 # import chamfer
@@ -26,38 +27,65 @@ from utils.data_utils import load_kitti_poses
 
 
 def main(args):
-    print("--- Running Part 3: Post-FlexCloud Processing ---")
+    print("--- Running Part 3: Post-Processing ---")
 
     ################ Set device ################################
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
 
-    save_dir = args.scene_io_dir
-    context_file_path = os.path.join(save_dir, "preprocessed_data.npz")
+    ################## Directory to load temporary data ############
+    scene_io_dir = args.scene_io_dir
+    context_file_path = os.path.join(scene_io_dir, "preprocessed_data.npz")
 
-    # --- Load the saved context from Part 1 ---
+    ################# Load the data from part1 #####################
     print(f"Loading pipeline context from {context_file_path}...")
     context = np.load(context_file_path, allow_pickle=True)
 
     dict_list = context['dict_list']
-    poses_kiss_icp = context['poses_kiss_icp']  # This might be None
-    config = context['config'].item()  # .item() to get the dictionary back
-    # truckscenesyaml = context['truckscenesyaml'].item()
-    # learning_map = context['learning_map'].item()
+
+    poses_kiss_icp = context['poses_kiss_icp']  # None if no kiss-icp used in part1
+    gt_relative_poses_arr = context['gt_relative_poses_arr']
+
     category_name_to_learning_id = context['category_name_to_learning_id'].item()
     learning_id_to_name = context['learning_id_to_name'].item()
-    pc_range = context['pc_range']
-    voxel_size = context['voxel_size'].item()
-    occ_size = context['occ_size']
-    save_path = str(context['save_path'])
-    scene_name = str(context['scene_name'])
+
+    ###################### Load config and get needed information #######################
+    config = context['config'].item()
+    pc_range = config['pc_range']
+    self_range = config['self_range']
+    voxel_size = config['voxel_size']
+    occ_size = config['occ_size']
+    sensors = config['sensors']
+
+    # Parameters for voxel filtering
+    ransac_distance_threshold = config['ransac_dist_threshold']
+    voxel_size_filter_static_map = config["voxel_filter_size_aggregated"]
+
+    # Parameters for static map aggregation
+    window_size_keyframe_only_aggregation = config['window_size_keyframe_only_aggregation']
+    window_size_all = config['window_size_all']
+
+    # Parameters for aggregation of dynamic objects
+    volume_ratio_tolerance = config['volume_ratio_tolerance']
+    dim_ratio_tolerance = config['dim_ratio_tolerance']
+    z_tolerance = config['z_tolerance']
+
+    # Parameters for refinement
+    refinement_high_overlap_threshold = config['refinement_high_overlap_threshold']
+    refinement_truck_hitch_height = config['refinement_truck_hitch_height']
+
+    # Values for visibility masks
+    cameras = config['cameras']
+    camera_ray_depth_max = config['camera_ray_depth_max']  # e.g., 70 meters
+    sensor_max_ranges_arr = context['sensor_max_ranges_arr']
+
+    # Label for free and background objects
     FREE_LEARNING_INDEX = context['FREE_LEARNING_INDEX'].item()
     BACKGROUND_LEARNING_INDEX = context['BACKGROUND_LEARNING_INDEX'].item()
-    sensors = context['sensors']
-    cameras = context['cameras']
-    sensor_max_ranges_arr = context['sensor_max_ranges_arr']
-    self_range = context['self_range']
-    gt_relative_poses_arr = context['gt_relative_poses_arr']
+
+    # Path to save the final occupancy grids
+    save_path = str(context['save_path'])
+    scene_name = str(context['scene_name'])
 
     ########################### Cleaned map after mapmos with keyframes and non-keyframes ############################
     static_points_refined_loaded = context['static_points_refined']
@@ -123,21 +151,15 @@ def main(args):
 
     ####################################### Filtering on each point cloud in the list ###############################
     if args.filter_static_pc_list:
-        print("\n--- Applying per-frame DBSCAN filtering to the list of point clouds ---")
+        print("\n--- Applying per-frame voxel filtering to the list of point clouds ---")
         static_points_refined = []
         static_points_refined_sensor_ids = []
-        for filter_idx, pc_to_filter_np in enumerate(static_points_refined_loaded):
+        for filter_idx, pc_to_filter_np in enumerate(tqdm(static_points_refined_loaded, desc="Voxel filtering each frame")):
             sids_to_filter = static_points_refined_sensor_ids_loaded[filter_idx]
 
-            # Convert numpy array to Open3D PointCloud
             pcd_to_filter = o3d.geometry.PointCloud()
             pcd_to_filter.points = o3d.utility.Vector3dVector(pc_to_filter_np[:, :3])
 
-            # Call your new advanced filtering function
-            """cleaned_pcd, kept_indices = denoise_near_points_dbscan(
-                pcd_to_filter,
-                config
-            )"""
             cleaned_pcd, kept_indices = denoise_near_points_voxel(
                 pcd_to_filter,
                 config
@@ -180,7 +202,7 @@ def main(args):
     if args.use_flexcloud:
         print("Using flexcloud path for final static map")
         # Load the corrected poses from FlexCloud's output ---
-        flexcloud_output_dir = os.path.join(save_dir, "flexcloud_io/pcd_transformed")
+        flexcloud_output_dir = os.path.join(scene_io_dir, "flexcloud_io/pcd_transformed")
         flexcloud_xyz_poses_path = os.path.join(flexcloud_output_dir, "traj_matching/target_rs.txt")
 
         print(f"Loading corrected poses from {flexcloud_xyz_poses_path}...")
@@ -217,14 +239,14 @@ def main(args):
 
         print(f"Successfully loaded {flexcloud_corrected_poses.shape[0]} corrected poses.")
 
-        gt_poses = np.array([frame['ego_ref_from_ego_i'] for frame in dict_list])
-        kiss_poses = context['poses_kiss_icp']
+        #gt_poses = np.array([frame['ego_ref_from_ego_i'] for frame in dict_list])
+        #gt_poses = gt_relative_poses_arr
 
         # Comparison 1: KISS-ICP vs Ground Truth
-        if kiss_poses is not None:
+        if poses_kiss_icp is not None:
             calculate_and_plot_pose_errors(
-                poses_estimated=kiss_poses,
-                poses_reference=gt_poses,
+                poses_estimated=poses_kiss_icp,
+                poses_reference=gt_relative_poses_arr,
                 title_prefix="KISS-ICP vs GT",
                 scene_name=scene_name,
                 save_dir=args.save_path,
@@ -234,7 +256,7 @@ def main(args):
         # Comparison 2: FlexCloud vs Ground Truth
         calculate_and_plot_pose_errors(
             poses_estimated=flexcloud_corrected_poses,
-            poses_reference=gt_poses,
+            poses_reference=gt_relative_poses_arr,
             title_prefix="FlexCloud vs GT",
             scene_name=scene_name,
             save_dir=args.save_path,
@@ -242,10 +264,10 @@ def main(args):
         )
 
         # Comparison 3: FlexCloud vs KISS-ICP (to see the correction amount)
-        if kiss_poses is not None:
+        if poses_kiss_icp is not None:
             calculate_and_plot_pose_errors(
                 poses_estimated=flexcloud_corrected_poses,
-                poses_reference=kiss_poses,
+                poses_reference=poses_kiss_icp,
                 title_prefix="FlexCloud vs KISS-ICP",
                 scene_name=scene_name,
                 save_dir=args.save_path,
@@ -317,7 +339,7 @@ def main(args):
     keyframe_indices = [idx for idx, frame_info in enumerate(dict_list) if frame_info['is_key_frame']]
     print(f"Found {len(keyframe_indices)} keyframes.")
 
-    for keyframe_list_idx, i in enumerate(tqdm(keyframe_indices, desc="Processing Keyframes")):
+    for keyframe_list_idx, i in enumerate(keyframe_indices):
         with torch.no_grad():
             frame_dict = dict_list[i]
             print(f"\n--- Processing Keyframe (Original Index: {i}) ---")
@@ -332,9 +354,8 @@ def main(args):
 
             if args.static_map_keyframes_only:
                 # --- LOGIC A: Use a window of +/- 5 KEYFRAMES ---
-                window_size_kf = 5
-                start_kf_idx = max(0, keyframe_list_idx - window_size_kf)
-                end_kf_idx = min(len(keyframe_indices), keyframe_list_idx + window_size_kf + 1)
+                start_kf_idx = max(0, keyframe_list_idx - window_size_keyframe_only_aggregation)
+                end_kf_idx = min(len(keyframe_indices), keyframe_list_idx + window_size_keyframe_only_aggregation + 1)
 
                 # Get the actual frame indices from our pre-calculated list
                 window_frame_indices = keyframe_indices[start_kf_idx:end_kf_idx]
@@ -342,7 +363,6 @@ def main(args):
 
             else:
                 # --- LOGIC B: Use a window of +/- 5 ALL FRAMES around the current keyframe ---
-                window_size_all = 5
                 start_frame_idx = max(0, i - window_size_all)
                 end_frame_idx = min(len(dict_list), i + window_size_all + 1)
 
@@ -364,7 +384,7 @@ def main(args):
 
             # Concatenate to create the final local map for this keyframe
             if not local_map_points_list:
-                print(f"  -> WARNING: No points found for local map in keyframe {i}. Skipping.")
+                print(f"  -> WARNING: No points found for local map in frame {i}. Skipping.")
                 continue
 
             point_cloud_local = np.concatenate(local_map_points_list, axis=0)
@@ -386,7 +406,7 @@ def main(args):
 
                 # --- Step 1: Identify ground points to protect using RANSAC ---
                 print("Segmenting ground plane using RANSAC...")
-                plane_model, ground_indices = pcd_aggregated.segment_plane(distance_threshold=0.35,
+                plane_model, ground_indices = pcd_aggregated.segment_plane(distance_threshold=ransac_distance_threshold,
                                                                            ransac_n=3,
                                                                            num_iterations=1000)
                 ground_indices_set = set(ground_indices)
@@ -394,8 +414,7 @@ def main(args):
 
                 # --- Step 2: Run the Voxel Neighborhood Filter on the whole cloud ---
                 print("Running Voxel Neighborhood Filter...")
-                voxel_size = config.get("voxel_filter_size_aggregated", 0.2)
-                voxel_grid = o3d.geometry.VoxelGrid.create_from_point_cloud(pcd_aggregated, voxel_size=voxel_size)
+                voxel_grid = o3d.geometry.VoxelGrid.create_from_point_cloud(pcd_aggregated, voxel_size=voxel_size_filter_static_map)
 
                 # Get all occupied voxels and build a KDTree on their centers for fast search
                 voxels = voxel_grid.get_voxels()
@@ -404,18 +423,18 @@ def main(args):
                 kdtree = o3d.geometry.KDTreeFlann(pcd_centers)
 
                 # Find which voxels have enough neighbors
-                search_radius = voxel_size * config.get('voxel_search_radius_multiplier_aggregated', 5)
-                neighborhood_threshold = config.get("voxel_neighborhood_threshold_aggregated", 7)
+                search_radius = voxel_size_filter_static_map * config['voxel_search_radius_multiplier_aggregated']
+                neighborhood_threshold = config["voxel_neighborhood_threshold_aggregated"]
                 valid_voxel_indices = [
-                    i for i, center in enumerate(tqdm(voxel_centers, desc="Voxel Neighborhood Search"))
+                    voxel_id for voxel_id, center in enumerate(tqdm(voxel_centers, desc="Voxel Neighborhood Search"))
                     if len(kdtree.search_radius_vector_3d(center, search_radius)[1]) >= neighborhood_threshold
                 ]
                 valid_voxels_to_keep = {tuple(voxels[i].grid_index) for i in valid_voxel_indices}
 
                 # Efficiently find all points that fall into the valid voxels
                 voxel_to_points_map = defaultdict(list)
-                for i in range(len(pcd_aggregated.points)):
-                    voxel_to_points_map[tuple(voxel_grid.get_voxel(pcd_aggregated.points[i]))].append(i)
+                for indexes in range(len(pcd_aggregated.points)):
+                    voxel_to_points_map[tuple(voxel_grid.get_voxel(pcd_aggregated.points[indexes]))].append(i)
 
                 kept_by_filter_indices = [idx for grid in valid_voxels_to_keep for idx in
                                           voxel_to_points_map.get(grid, [])]
@@ -463,7 +482,7 @@ def main(args):
             ############################## Visualization ######################################################
             if args.vis_filtered_aggregated_static:
                 visualize_pointcloud(point_cloud.T,
-                                     title=f"Aggregated Refined Static PC (Global) - Scene {scene_name}")
+                                     title=f"Aggregated Refined Static PC (Global) - {scene_name} - Frame {i}")
 
             ############################## Transform points into common reference frame i ############################
             sample = trucksc.get('sample', frame_dict['sample_token'])
@@ -503,7 +522,7 @@ def main(args):
                 class_name = learning_id_to_name.get(class_id, 'background')  # Safely get the name
                 short_token = current_object_token.split('-')[0]
 
-                print(f"  Processing dynamic object: {class_name} ('{short_token}...') for keyframe {i}...")
+                print(f"  Processing dynamic object: {class_name} ('{short_token}...') for frame {i}...")
 
                 # --- 1. Get the interaction signature for the object in THIS keyframe ---
                 signature_at_keyframe_i = get_object_overlap_signature_BATCH(frame_dict, keyframe_obj_idx)
@@ -547,11 +566,11 @@ def main(args):
                                 CLASS_BASED_THRESHOLDS
                         ) and
                                 are_box_sizes_similar(bbox_params_keyframe, bbox_params_candidate,
-                                                      volume_ratio_tolerance=1.05,
-                                                      dim_ratio_tolerance=1.05) and
+                                                      volume_ratio_tolerance=volume_ratio_tolerance,
+                                                      dim_ratio_tolerance=dim_ratio_tolerance) and
                                 is_point_centroid_z_similar(points_keyframe, points_candidate,
                                                             category_id_keyframe, OTHER_VEHICLE_ID,
-                                                            z_tolerance=0.3)):
+                                                            z_tolerance=z_tolerance)):
                             # Contexts match! Get the points from this candidate frame.
                             obj_points_in_candidate = candidate_frame_data['object_points_list'][candidate_obj_idx]
                             obj_sids_in_candidate = candidate_frame_data['object_points_list_sensor_ids'][
@@ -583,7 +602,7 @@ def main(args):
                     aggregated_canonical_sids = np.concatenate(contextual_canonical_sids_segments, axis=0)
                     print(f"      -> Aggregated {aggregated_canonical_points.shape[0]} points for this context.")
                 else:
-                    print(f"      -> No similar contexts found. Using points from keyframe {i} only.")
+                    print(f"      -> No similar contexts found. Using points from frame {i} only.")
                     obj_points_in_keyframe = frame_dict['object_points_list'][keyframe_obj_idx]
                     if obj_points_in_keyframe is not None and obj_points_in_keyframe.shape[0] > 0:
                         # Canonicalize points from the current keyframe itself
@@ -736,7 +755,8 @@ def main(args):
                     ID_FORKLIFT=OTHER_VEHICLE_ID,
                     ID_PEDESTRIAN=PEDESTRIAN_ID,
                     device=device,
-                    high_overlap_threshold=0.80
+                    high_overlap_threshold=refinement_high_overlap_threshold,
+                    hitch_height=refinement_truck_hitch_height
                 )
 
                 # --- Step 4: Update the labels within our semantic dynamic points array ---
@@ -941,7 +961,7 @@ def main(args):
                     voxel_size_cpu_scalar=voxel_size,
                     spatial_shape_cpu_list=occ_size,
                     camera_names=cameras,
-                    DEPTH_MAX_val=config.get('camera_ray_depth_max', 100.0)  # e.g., 70 meters
+                    DEPTH_MAX_val=camera_ray_depth_max
                 )
 
                 print(f"Camera visibility mask cpu has the shape: {mask_camera.shape}")
@@ -1009,7 +1029,20 @@ def main(args):
                 f"  Saved 'mask_camera' shape: {mask_camera_to_save.shape} (0=unobserved, 1=observed)")
 
     ################################################################################################################
-    ################################################################################################################
+    ######################################### Saving args ######################################################
+
+    print("\nSaving Part 3 runtime arguments...")
+    scene_output_dir = os.path.join(save_path, scene_name)
+    os.makedirs(scene_output_dir, exist_ok=True)
+    args_file_path = os.path.join(scene_output_dir, 'part3_runtime_args.json')
+    args_dict = vars(args)
+
+    # Write the dictionary to a nicely formatted JSON file
+    with open(args_file_path, 'w') as f:
+        json.dump(args_dict, f, indent=4)
+
+    print(f"✅ Part 3 arguments saved to: {args_file_path}")
+    #############################################################################################################
 
     print("--- Part 3 Complete ---")
     print("Pipeline finished successfully!")
@@ -1046,7 +1079,7 @@ if __name__ == '__main__':
 
     ######################################## Filter settings ##########################################
     parse.add_argument('--filter_static_pc_list', action='store_true',
-                       help='Enable per-frame advanced DBSCAN filtering before aggregation.')
+                       help='Enable per-frame advanced voxel filtering before aggregation.')
     parse.add_argument('--filter_aggregated_static_map', action='store_true',
                        help='Enable aggregated static map filtering')
 

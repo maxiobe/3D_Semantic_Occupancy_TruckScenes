@@ -5,7 +5,10 @@ import torch
 import sys
 import time
 import yaml
+import json
+import shutil
 import os.path as osp
+from pathlib import Path
 from truckscenes.utils import splits
 from truckscenes.truckscenes import TruckScenes
 from utils.pointcloud_loading import load_lidar_entries, group_entries, get_rigid_fused_pointcloud, get_pointwise_fused_pointcloud
@@ -49,19 +52,39 @@ def main(trucksc, indice, truckscenesyaml, args, config):
     max_time_diff = config[
         'max_time_diff']  # allowed time difference between different sensors for aggregating over sensors
 
+    # Enlarged bboxes
+    percentage_factor = config['bbox_enlarge_percentage_factor']
+    max_absolute_increase_m = config['bbox_enlarge_max_increase_m']  # The maximum total increase for any dimension (e.g., 25cm per side)
+
+    # Max enlarged bboxes
+    percentage_factor_max = config['bbox_max_enlarge_percentage_factor']
+    fixed_increase_m = config['bbox_max_enlarge_fixed_increase_m']
+    special_scales_max_enlarged_bboxes = config['bbox_special_width_scales']
+
+    # ICP input pc velocity threshold bboxes to keep
+    VELOCITY_THRESHOLD_M_S = config['moving_object_velocity_threshold_ms']
+
+    # Weight path for mapmos
+    weights_path_mapmos = Path(config['weights_path_mapmos'])
+    if not weights_path_mapmos:
+        raise ValueError("MapMOS weights path is not specified in the config file.")
+
+    # FlexCloud
+    std_dev_placeholder = np.array(config['flexcloud_gnss_std_dev_placeholder'])
+    imu_freq = config['rosbag_imu_frequency_hz']
+
+
     ################################ Load config for used sensors for aggregation #################################
     sensors = config['sensors']
     print(f"Lidar sensors: {sensors}")
 
-    ########################### Generate list for sensor range (needed for visibility masks) later ###################
-    sensors_max_range_list = []
-    for sensor in sensors:
-        if sensor in ['LIDAR_LEFT', 'LIDAR_RIGHT']:
-            sensors_max_range_list.append(200)
-        if sensor in ['LIDAR_TOP_FRONT', 'LIDAR_TOP_LEFT', 'LIDAR_TOP_RIGHT', 'LIDAR_REAR']:
-            sensors_max_range_list.append(35)
+    ########################### Generate list for sensor range ###################
+    sensor_ranges_map = config['lidar_sensor_max_ranges']
+    sensors_max_range_list = [sensor_ranges_map[s] for s in sensors]
     print(f"Lidar sensors max range: {sensors_max_range_list}")
     sensor_max_ranges_arr = np.array(sensors_max_range_list, dtype=np.float64)
+
+    print(f"Lidar sensors max range: {sensor_max_ranges_arr}")
 
     ############################## Load config for cameras for camera visibility mask ###############################
     cameras = config['cameras']
@@ -188,12 +211,7 @@ def main(trucksc, indice, truckscenesyaml, args, config):
             print(f"The fused sensor pc at frame {i} has the shape: {sensor_fused_pc.points.shape} with no timestamps.")
 
         ############################# Specify list for scenes with manual annotations given ####################
-        if args.version == 'v1.0-trainval':
-            scene_terminal_list = [4, 68, 69, 70, 203, 205, 206, 241, 272, 273, 423, 492, 597]
-        elif args.version == 'v1.0-test':
-            scene_terminal_list = [3, 114, 115, 116]
-        elif args.version == 'v1.0-mini':
-            scene_terminal_list = [5]
+        scene_terminal_list = config['manual_annotation_scenes'].get(args.version, [])
 
         ################################# Uncomment if you need to save pointclouds for annotation ###########################
 
@@ -290,9 +308,6 @@ def main(trucksc, indice, truckscenesyaml, args, config):
             np.float32)
 
         ############################### Enlarge bounding boxes to extract dynamic points #################
-        percentage_factor = 1.10
-        max_absolute_increase_m = 0.5  # The maximum total increase for any dimension (e.g., 25cm per side)
-
         # 1. Calculate the dimensions if extended by the percentage factor
         dims_extended_by_percentage = dims * percentage_factor
 
@@ -318,9 +333,6 @@ def main(trucksc, indice, truckscenesyaml, args, config):
         ################################################ Bounding box just for filtering dynamic map ###################
         gt_bbox_3d_points_in_boxes_cpu_max_enlarged = gt_bbox_3d_unmodified.copy()
 
-        percentage_factor_max = 1.15
-        fixed_increase_m = 0.3
-
         increase_from_percentage = dims * (percentage_factor_max - 1.0)
 
         final_increase = np.maximum(increase_from_percentage, fixed_increase_m)
@@ -328,14 +340,15 @@ def main(trucksc, indice, truckscenesyaml, args, config):
         dims_filter = dims + final_increase
 
         # enlarge width of cars and trucks as mirrors often not included in bounding boxes --> avoid artifacts
-        width_scale_car = 1.20
-        width_scale_truck = 1.35
+
         for index, cat in enumerate(original_object_category_names):
             if cat == 'vehicle.car':
-                special_width = dims[index, 0] * width_scale_car
+                scale = special_scales_max_enlarged_bboxes[cat]
+                special_width = dims[index, 0] * scale
                 dims_filter[index, 0] = np.maximum(dims_filter[index, 0], special_width)
             elif cat == 'vehicle.truck':
-                special_width = dims[index, 0] * width_scale_truck
+                scale = special_scales_max_enlarged_bboxes[cat]
+                special_width = dims[index, 0] * scale
                 dims_filter[index, 0] = np.maximum(dims_filter[index, 0], special_width)
 
         gt_bbox_3d_points_in_boxes_cpu_max_enlarged[:,
@@ -412,7 +425,6 @@ def main(trucksc, indice, truckscenesyaml, args, config):
         inside_ego_mask = (inside_x & inside_y & inside_z).cpu().numpy()
 
         ############################ Prepare point clouds for kiss-icp #################################
-        VELOCITY_THRESHOLD_M_S = 0.2
 
         is_box_moving_mask = np.zeros(len(boxes_ego), dtype=bool)
         annotated_boxes_indices = [idx for idx, box in enumerate(boxes_ego) if box.token is not None]
@@ -1057,7 +1069,7 @@ def main(trucksc, indice, truckscenesyaml, args, config):
 
         if args.icp_refinement and in_memory_dataset:
             try:
-                kiss_config_path = Path('kiss_config.yaml')
+                kiss_config_path = Path(config['kiss_icp_config_path'])
                 pipeline = OdometryPipeline(dataset=in_memory_dataset, config=kiss_config_path,
                                             initial_guesses_relative=initial_relative_motions)
                 print("KISS-ICP pipeline initialized.")
@@ -1092,7 +1104,15 @@ def main(trucksc, indice, truckscenesyaml, args, config):
                 import traceback
                 traceback.print_exc()
 
-        # --- 3. Apply Refined Poses to Original Point Clouds (Only if ICP succeeded) ---
+    ################################################################################################################
+
+    #################################### Saving data for FlexCloud ################################################
+    if args.use_flexcloud:
+        if not args.icp_refinement:
+            print("Data for flexcloud cannot be saved as no ICP refinement is enabled.")
+            sys.exit()
+        print("Saving data for flexcloud....")
+
         if args.icp_refinement and estimated_poses_kiss is not None:
             print("Applying refined poses from KISS-ICP...")
             refined_lidar_pc_list = []
@@ -1100,9 +1120,9 @@ def main(trucksc, indice, truckscenesyaml, args, config):
             for idx, points_ego in enumerate(
                     static_points_refined):
                 pose = estimated_poses_kiss[idx]
-                #print(f"Applying refined pose {idx}: {pose}")
+                # print(f"Applying refined pose {idx}: {pose}")
 
-                #print(f"Points ego shape: {points_ego.shape}")
+                # print(f"Points ego shape: {points_ego.shape}")
 
                 points_xyz = points_ego[:, :3]
                 points_homo = np.hstack((points_xyz, np.ones((points_xyz.shape[0], 1))))
@@ -1114,48 +1134,21 @@ def main(trucksc, indice, truckscenesyaml, args, config):
 
                 refined_lidar_pc_list.append(points_transformed)
 
-        # --- 4. Compare KISS-ICP Poses with Ground Truth ---
-        if 'gt_relative_poses_arr' in locals() and gt_relative_poses_arr.shape[0] > 0:
-            if poses_kiss_icp.shape[0] == gt_relative_poses_arr.shape[0]:
-                calculate_and_plot_pose_errors(
-                    poses_estimated=poses_kiss_icp,
-                    poses_reference=gt_relative_poses_arr,
-                    title_prefix="KISS-ICP vs GT",
-                    scene_name=scene_name,
-                    save_dir=args.save_path,
-                    show_plot=args.pose_error_plot
-                )
-
-            else:
-                print(f"Warning: Number of KISS-ICP poses ({poses_kiss_icp.shape[0]}) "
-                      f"does not match GT relative poses ({gt_relative_poses_arr.shape[0]}). Cannot compare.")
-
-        elif not ('gt_relative_poses_arr' in locals() and gt_relative_poses_arr.shape[0] > 0):
-            print("GT relative poses not available for comparison.")
-
-    if not args.icp_refinement:
-        print("ICP refinement is OFF. Using mapmos points (if enabled) or unrefined points (if mapmos unabled) (in reference ego frame) for aggregation.")
-        source_pc_list_all_frames_to_transform = static_points_refined
-        source_pc_list_all_frames = []
-        for index_transform, pc_to_transform in enumerate(source_pc_list_all_frames_to_transform):
-            pose = gt_relative_poses_list[index_transform]
-            transformed_points_ego_ref = transform_points(pc_to_transform, pose)
-            source_pc_list_all_frames.append(transformed_points_ego_ref)
-
-        source_pc_sids_list_all_frames = static_points_refined_sensor_ids
-    else:
-        print("ICP refinement is ON. Using KISS-ICP refined points for aggregation.")
-        source_pc_list_all_frames = refined_lidar_pc_list
-        source_pc_sids_list_all_frames = static_points_refined_sensor_ids
-
-    ################################################################################################################
-
-    #################################### Saving data for FlexCloud ################################################
-    if args.use_flexcloud:
         if not args.icp_refinement:
-            print("Data for flexcloud cannot be saved as no ICP refinement is enabled.")
-            sys.exit()
-        print("Saving data for flexcloud....")
+            print(
+                "ICP refinement is OFF. Using mapmos points (if enabled) or unrefined points (if mapmos unabled) (in reference ego frame) for aggregation.")
+            source_pc_list_all_frames_to_transform = static_points_refined
+            source_pc_list_all_frames = []
+            for index_transform, pc_to_transform in enumerate(source_pc_list_all_frames_to_transform):
+                pose = gt_relative_poses_list[index_transform]
+                transformed_points_ego_ref = transform_points(pc_to_transform, pose)
+                source_pc_list_all_frames.append(transformed_points_ego_ref)
+
+            source_pc_sids_list_all_frames = static_points_refined_sensor_ids
+        else:
+            print("ICP refinement is ON. Using KISS-ICP refined points for aggregation.")
+            source_pc_list_all_frames = refined_lidar_pc_list
+            source_pc_sids_list_all_frames = static_points_refined_sensor_ids
 
         #################################### Filtering based on if only keyframes should be used ###########################
         print(f"Static map aggregation: --static_map_keyframes_only is {args.static_map_keyframes_only}")
@@ -1235,7 +1228,6 @@ def main(trucksc, indice, truckscenesyaml, args, config):
 
         gnss_data_save = []
         # Define a constant, low standard deviation for all points
-        std_dev_placeholder = np.array([0.1, 0.1, 0.1])
         for dict_idx, frame_dict in enumerate(dict_list):
             # 1. Get the full 4x4 transformation matrix
             #transform_matrix_global_from_ego = frame_dict['global_from_ego_i']
@@ -1293,9 +1285,6 @@ def main(trucksc, indice, truckscenesyaml, args, config):
 
             print(f"Padded all lists. New total items: {len(timestamps_save)}")
 
-        config_path_select_keyframes = "/flexcloud/config/select_keyframes.yaml"
-        config_path_pcd_georef = "/flexcloud/config/pcd_georef.yaml"
-
         # 3. Save your in-memory data to the temporary files
         save_poses_to_kitti_format(kiss_icp_poses_save, odom_path)
         save_gnss_to_directory(gnss_data_save, timestamps_save, pos_dir)
@@ -1317,7 +1306,6 @@ def main(trucksc, indice, truckscenesyaml, args, config):
         end_timestamp_imu = last_lidar_timestamp
 
         # Define the desired IMU frequency (e.g., 100 Hz)
-        imu_freq = 100
         time_step = int(1e6 / imu_freq)
 
         high_freq_timestamps = np.arange(start_timestamp_imu, end_timestamp_imu, time_step)
@@ -1371,38 +1359,6 @@ def main(trucksc, indice, truckscenesyaml, args, config):
     context_file_path = os.path.join(args.scene_io_dir, "preprocessed_data.npz")
     print(f"Saving general data dict to {context_file_path}")
 
-    """np.savez_compressed(
-        context_file_path,
-        lidar_pc_list_for_concat=np.array(lidar_pc_list_for_concat, dtype=object),
-        lidar_pc_sids_list_for_concat=np.array(lidar_pc_sids_list_for_concat, dtype=object),
-        static_points_refined=np.array(static_points_refined, dtype=object),
-        static_points_refined_sensor_ids=np.array(static_points_refined_sensor_ids, dtype=object),
-        #lidar_pc_final_global=lidar_pc_final_global,
-        #lidar_pc_final_global_sensor_ids=lidar_pc_final_global_sensor_ids,
-        dict_list=np.array(dict_list, dtype=object),
-        poses_kiss_icp=poses_kiss_icp,  # Can be None if ICP was skipped
-        gt_relative_poses_arr=gt_relative_poses_arr,
-        # --- Config/Args needed by Part 3 ---
-        config=np.array(config, dtype=object),
-        #truckscenesyaml=np.array(truckscenesyaml, dtype=object),
-        learning_map=np.array(learning_map, dtype=object),
-        learning_id_to_name=np.array(learning_id_to_name, dtype=object),
-        category_name_to_learning_id=np.array(category_name_to_learning_id, dtype=object),
-        pc_range=np.array(pc_range, dtype=object),
-        voxel_size=voxel_size,
-        occ_size=np.array(occ_size, dtype=object),
-        save_path=save_path,
-        scene_name=scene_name,
-        #args_dict=np.array(vars(args), dtype=object),  # Save args as a dictionary
-        # --- Constants ---
-        FREE_LEARNING_INDEX=FREE_LEARNING_INDEX,
-        BACKGROUND_LEARNING_INDEX=BACKGROUND_LEARNING_INDEX,
-        sensors=np.array(sensors, dtype=object),
-        cameras=np.array(cameras, dtype=object),
-        sensor_max_ranges_arr=sensor_max_ranges_arr,
-        self_range=np.array(self_range, dtype=object)
-    )"""
-
     np.savez_compressed(
         context_file_path,
 
@@ -1421,27 +1377,47 @@ def main(trucksc, indice, truckscenesyaml, args, config):
         config=np.array(config, dtype=object),
         category_name_to_learning_id=np.array(category_name_to_learning_id, dtype=object),
         learning_id_to_name=np.array(learning_id_to_name, dtype=object),
-        pc_range=pc_range,
-        voxel_size=voxel_size,
-        occ_size=occ_size,
         save_path=save_path,
         scene_name=scene_name,
         FREE_LEARNING_INDEX=FREE_LEARNING_INDEX,
         BACKGROUND_LEARNING_INDEX=BACKGROUND_LEARNING_INDEX,
-        sensors=sensors,
-        cameras=cameras,
         sensor_max_ranges_arr=sensor_max_ranges_arr,
-        self_range=self_range
     )
 
     print("Finished saving general data dict")
-
-    print(f"\n--- Part 1 Complete ---")
     print(f"Saved pipeline context to {context_file_path}")
+
+    ###################################### Saving a copy of the config file to the target folder ######################
+
+    print(f"\nSaving a copy of the configuration file...")
+    source_config_path = args.config_path
+    save_path_config = os.path.join(save_path, scene_name)
+    os.makedirs(save_path_config, exist_ok=True)
+    destination_config_path = os.path.join(save_path_config, os.path.basename(source_config_path))
+    # Copy the file (shutil.copy2 also preserves metadata like timestamps)
+    shutil.copy2(source_config_path, destination_config_path)
+    print(f"✅ Configuration file saved to: {destination_config_path}")
+
+    ################################## Saving args for script 1 ###########################################
+    print(f"Saving runtime arguments...")
+    args_file_path = os.path.join(save_path_config, 'runtime_args_part1.json')
+    # Convert the argparse Namespace to a dictionary
+    args_dict = vars(args)
+
+    # Write the dictionary to a JSON file
+    with open(args_file_path, 'w') as f:
+        json.dump(args_dict, f, indent=4)
+
+    print(f"✅ Runtime arguments saved to: {args_file_path}")
+
+    ############################## Create success flag for checking if scene was in split ############################
+
     print("Creating success flag for Part 1...")
     flag_file_path = os.path.join(args.scene_io_dir, "part1_success.flag")
     with open(flag_file_path, 'w') as f:
         f.write('success')
+
+    print(f"\n--- Part 1 Complete ---")
 
 
 
