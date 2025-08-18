@@ -17,4 +17,4 @@ mapping:
   voxel_size: null
   max_points_per_voxel: 20
 
-out_dir: results
+out_dir: kiss_icp_results

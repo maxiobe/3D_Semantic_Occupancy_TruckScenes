@@ -43,6 +43,7 @@ class OdometryPipeline:
         self,
         dataset,
         config: Optional[Path] = None,
+        log_dir: Optional[str] = None,
         max_range: Optional[float] = None,
         visualize: bool = False,
         n_scans: int = -1,
@@ -60,7 +61,7 @@ class OdometryPipeline:
 
         # Config and output dir
         self.config = load_config(config, max_range=max_range)
-        self.results_dir = None
+        self.results_dir = log_dir
 
         # Pipeline
         self.odometry = KissICP(config=self.config)
@@ -255,4 +256,7 @@ class OdometryPipeline:
         return results_dir
 
     def _create_output_dir(self):
-        self.results_dir = self._get_results_dir(self.config.out_dir)
+        if self.results_dir:
+            os.makedirs(self.results_dir, exist_ok=True)
+        else:
+            self.results_dir = self._get_results_dir(self.config.out_dir)
