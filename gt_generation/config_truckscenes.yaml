@@ -2,15 +2,15 @@
 
 ##################################### General ###########################################
 # Voxel parameters for saving the occupancy grids
-'voxel_size': 0.2 #0.2 #0.4 # 0.5
-#'occ_size': [200, 200, 16]
-'occ_size': [750, 750, 50]
+'voxel_size': 0.4 #0.2 #0.2 #0.4 # 0.5
+'occ_size': [200, 200, 16]
+#'occ_size': [750, 750, 60]
 #'occ_size': [1500, 1500, 100]
 
 # Parameters for ranges
 'self_range': [-1.5, -1.5, -1.0, 6.3, 1.5, 4.2]
-#'pc_range':  [-40, -40, -1, 40, 40, 5.4]
-'pc_range': [-75, -75, -5, 75, 75, 15]
+'pc_range':  [-40, -40, -1, 40, 40, 5.4]
+#'pc_range': [-75, -75, -1, 75, 75, 11]
 #'pc_range': [-150, -150, -5, 150, 150, 15]
 
 # Definition of lidar sensors to be used for aggregation
