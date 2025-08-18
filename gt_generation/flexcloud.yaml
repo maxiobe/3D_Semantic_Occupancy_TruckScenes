@@ -1,0 +1,30 @@
+name: flexcloud
+channels:
+  - conda-forge
+dependencies:
+  # --- For stability, we pin the basics ---
+  - python=3.9
+  - gxx_linux-64=11.2
+  - cmake
+  - make
+
+  # --- Your specific required C++ library versions ---
+  - boost=1.74.0
+  - pcl=1.12.1
+  - cgal=5.4
+  - pyqt=5.15.9
+
+  # --- THE CRITICAL FIX ---
+  # Force Conda to install a VTK version that was built with Qt support.
+  # The '*qt*' part is a glob pattern that matches the build string.
+  - vtk=9.1.0=*qt*
+
+  - pybind11=3.0.0
+  - pyyaml
+
+  # --- Other project dependencies ---
+  - geographiclib
+  - yaml-cpp
+
+  - pip:
+      - rerun-sdk==0.24.0
