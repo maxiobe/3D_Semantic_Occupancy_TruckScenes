@@ -183,13 +183,13 @@ void KeyframeInterpolation::select_keyframes(
     this->pos_keyframes_.push_back(search_closest(this->frames_.front()));
   }
 
-  std::cout << "First frame successful\n";
+  //std::cout << "First frame successful\n";
 
   // Set keyframes
   for (const auto & frame : this->frames_) {
-    std::cout << "--> Processing frame with timestamp: "
+    /*std::cout << "--> Processing frame with timestamp: "
               << std::fixed << std::setprecision(6)
-              << static_cast<double>(frame->get_timestamp()) / 1000000000 << std::endl;
+              << static_cast<double>(frame->get_timestamp()) / 1000000000 << std::endl;*/
 
     const auto & last_keyframe_pose = this->keyframes_.back()->pose;
     const auto & current_frame_pose = frame->pose;
@@ -211,7 +211,7 @@ void KeyframeInterpolation::select_keyframes(
     }
   }
 
-  std::cout << "Finished setting keyframes";
+  //std::cout << "Finished setting keyframes";
 
   if (!interpolate) {
     // Output max time difference that occured during keyframe selection
