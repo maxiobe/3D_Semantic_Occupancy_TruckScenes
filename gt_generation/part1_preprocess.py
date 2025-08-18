@@ -36,9 +36,6 @@ def main(trucksc, indice, truckscenesyaml, args, config):
     save_path = args.save_path  # Directory where processed data will be saved
     data_root = args.dataroot  # Root directory of dataset
     learning_map = truckscenesyaml['learning_map']  # dictionary that maps raw semantic labels to learning labels
-    voxel_size = config['voxel_size']  # Size of each voxel in the occupancy grid
-    pc_range = config['pc_range']  # Range of point cloud coordinates to consider
-    occ_size = config['occ_size']  # Dimensions of the output occupancy grid
     load_mode = args.load_mode  # Load mode of point clouds with or wihtout deskewing
     self_range = config[
         'self_range']  # Range threshold for the vehicle's own points
@@ -919,7 +916,7 @@ def main(trucksc, indice, truckscenesyaml, args, config):
         in_memory_dataset_mapmos = None
         mapmos_pipeline = None
         estimated_poses_kiss = None
-        log_dir_mapmos = osp.join(save_path, scene_name, "mapmos_logs")
+        log_dir_mapmos = osp.join(save_path, scene_name, "mapmos_results")
 
         mapmos_labels_per_scan = [frame_dict['mapmos_per_point_labels'] for frame_dict in dict_list]
         final_static_keep_mask = [frame_dict['final_static_mask'] for frame_dict in dict_list]
@@ -953,6 +950,7 @@ def main(trucksc, indice, truckscenesyaml, args, config):
                     dataset=in_memory_dataset_mapmos,
                     weights=weights_path_mapmos,
                     config=config_path_mapmos,
+                    log_dir=log_dir_mapmos,
                     visualize=False,
                     save_ply=args.save_mapmos_pc,
                     save_kitti=False,
@@ -1048,7 +1046,7 @@ def main(trucksc, indice, truckscenesyaml, args, config):
         in_memory_dataset = None
         pipeline = None
         estimated_poses_kiss = None
-        log_dir_kiss = osp.join(save_path, scene_name, "kiss_icp_logs")
+        log_dir_kiss = osp.join(save_path, scene_name, "kiss_icp_results")
 
         try:
             icp_input_pc_list = [frame_dict['lidar_pc_for_icp_ego_i'] for frame_dict in dict_list]
@@ -1070,7 +1068,7 @@ def main(trucksc, indice, truckscenesyaml, args, config):
         if args.icp_refinement and in_memory_dataset:
             try:
                 kiss_config_path = Path(config['kiss_icp_config_path'])
-                pipeline = OdometryPipeline(dataset=in_memory_dataset, config=kiss_config_path,
+                pipeline = OdometryPipeline(dataset=in_memory_dataset, config=kiss_config_path, log_dir=log_dir_kiss,
                                             initial_guesses_relative=initial_relative_motions)
                 print("KISS-ICP pipeline initialized.")
             except Exception as e:

@@ -429,12 +429,12 @@ def main(args):
                     voxel_id for voxel_id, center in enumerate(tqdm(voxel_centers, desc="Voxel Neighborhood Search"))
                     if len(kdtree.search_radius_vector_3d(center, search_radius)[1]) >= neighborhood_threshold
                 ]
-                valid_voxels_to_keep = {tuple(voxels[i].grid_index) for i in valid_voxel_indices}
+                valid_voxels_to_keep = {tuple(voxels[voxel_i].grid_index) for voxel_i in valid_voxel_indices}
 
                 # Efficiently find all points that fall into the valid voxels
                 voxel_to_points_map = defaultdict(list)
                 for indexes in range(len(pcd_aggregated.points)):
-                    voxel_to_points_map[tuple(voxel_grid.get_voxel(pcd_aggregated.points[indexes]))].append(i)
+                    voxel_to_points_map[tuple(voxel_grid.get_voxel(pcd_aggregated.points[indexes]))].append(indexes)
 
                 kept_by_filter_indices = [idx for grid in valid_voxels_to_keep for idx in
                                           voxel_to_points_map.get(grid, [])]
@@ -450,7 +450,7 @@ def main(args):
                 point_cloud_sensor_ids = point_cloud_sensor_ids_unfiltered[final_indices_combined]
 
                 print(
-                    f"Original points: {len(pcd_aggregated.points)}. Final cleaned points: {len(points_ego_j)}")
+                    f"Original points: {len(pcd_aggregated.points)}. Final cleaned points: {len(final_indices_combined)}")
 
                 # --- Step 4: Comprehensive Visualization ---
                 if args.vis_filter_aggregated_static_map:

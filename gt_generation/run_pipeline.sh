@@ -6,24 +6,28 @@ set -e
 # Define the names of your Conda environments
 ENV_PREPROCESS="occ_kiss_p3d"
 ENV_ROSBAG="ros_tools"
-ENV_FLEXCLOUD="flexcloud-stable"
+ENV_FLEXCLOUD="flexcloud" #flexcloud-stable
 ENV_POSTPROCESS="occ_kiss_p3d"
 
 # For step 1
 CONFIG_PATH="config_truckscenes.yaml"
 LABEL_MAPPING="truckscenes.yaml"
-SAVE_PATH_GT="/home/max/ssd/Masterarbeit/TruckScenes/trainval/v1.0-trainval/gt/all_sensors_icp_validation"
-DATA_ROOT="/home/max/ssd/Masterarbeit/TruckScenes/trainval/v1.0-trainval"
-VERSION="v1.0-trainval"
-SPLIT="train"
-START=60
-END=61
+#SAVE_PATH_GT="/home/max/ssd/Masterarbeit/TruckScenes/trainval/v1.0-trainval/gt/final"
+SAVE_PATH_GT="/home/max/ssd/Masterarbeit/TruckScenes/mini/v1.0-mini/gts_low"
+#DATA_ROOT="/home/max/ssd/Masterarbeit/TruckScenes/trainval/v1.0-trainval"
+DATA_ROOT="/home/max/ssd/Masterarbeit/TruckScenes/mini/v1.0-mini"
+#VERSION="v1.0-trainval"
+VERSION="v1.0-mini"
+#SPLIT="train"
+SPLIT="all"
+START=0
+END=10
 LOAD_MODE="pointwise"
 
 USE_FLEXCLOUD=0
 # Set to 1 for the local, sliding-window map (part3_postprocess_reduced_static.py).
 # Set to 0 for the global map using all frames (part3_postprocess.py).
-USE_LOCAL_STATIC_MAP=01
+USE_LOCAL_STATIC_MAP=0
 # Define the root directory for your Python scripts
 PIPELINE_DIR="/home/max/Desktop/Masterarbeit/Python/3D_Semantic_Occupancy_TruckScenes/gt_generation"
 
@@ -50,29 +54,29 @@ do
     mkdir -p "$SCENE_IO_DIR"
 
     # --- Step 1: Pre-processing with Open3D ---
-    #echo "Activating environment: $ENV_PREPROCESS for Part 1..."
-    #conda activate "$ENV_PREPROCESS"
-    #python "${PIPELINE_DIR}/part1_preprocess.py" \
-      #  --dataroot "$DATA_ROOT" \
-     #   --version "$VERSION" \
-      #  --config_path "$CONFIG_PATH" \
-      #  --save_path "$SAVE_PATH_GT" \
-      #  --label_mapping "$LABEL_MAPPING" \
-      #  --split "$SPLIT" \
-      #  --idx "$i" \
-      #  --load_mode "$LOAD_MODE" \
-      #  --scene_io_dir "$SCENE_IO_DIR" \
-      #  --filter_mode both \
-      #  --filter_static_pc \
-      #  --initial_guess_mode ego_pose \
-      #  --run_mapmos \
-      #  --vis_aggregated_static_ego_ref_pc \
-      #  --static_map_keyframes_only \
-      #  --use_flexcloud "$USE_FLEXCLOUD" \
-      #  --vis_static_frame_comparison_kiss_refined \
-      #  --filter_lidar_intensity \
-      #  --pose_error_plot \
-      #  --icp_refinement \
+    echo "Activating environment: $ENV_PREPROCESS for Part 1..."
+    conda activate "$ENV_PREPROCESS"
+    python "${PIPELINE_DIR}/part1_preprocess.py" \
+        --dataroot "$DATA_ROOT" \
+        --version "$VERSION" \
+        --config_path "$CONFIG_PATH" \
+        --save_path "$SAVE_PATH_GT" \
+        --label_mapping "$LABEL_MAPPING" \
+        --split "$SPLIT" \
+        --idx "$i" \
+        --load_mode "$LOAD_MODE" \
+        --scene_io_dir "$SCENE_IO_DIR" \
+        --filter_mode both \
+        --filter_static_pc \
+        --initial_guess_mode ego_pose \
+        --run_mapmos \
+        --static_map_keyframes_only \
+        --use_flexcloud "$USE_FLEXCLOUD" \
+        --filter_lidar_intensity \
+        --icp_refinement \
+        #--vis_static_frame_comparison_kiss_refined \
+        #--pose_error_plot \
+        #--vis_aggregated_static_ego_ref_pc \
         #--vis_static_pc \
         #--vis_raw_pc \
         #--vis_static_pc_global \
@@ -81,7 +85,7 @@ do
         #--vis_aggregated_static_ego_i_pc \
         #--vis_aggregated_static_global_pc \
         #--vis_aggregated_raw_pc_ego_i \
-    #conda deactivate
+    conda deactivate
 
     # --- Step 1b: Create ROS Bag ---
     #echo "--- Preparing to create ROS Bag ---"
@@ -117,7 +121,7 @@ do
             # --- Step 2: FlexCloud Processing ---
             echo "Activating environment: $ENV_FLEXCLOUD for Part 2..."
             conda activate "$ENV_FLEXCLOUD"
-            python "${PIPELINE_DIR}/part2_run_flexcloud.py" "$SCENE_IO_DIR"
+            python "${PIPELINE_DIR}/part2_run_flexcloud.py" "$SCENE_IO_DIR" "$CONFIG_PATH"
             conda deactivate
         else
             echo "Skipping FlexCloud processing as USE_FLEXCLOUD is set to 0."
@@ -136,16 +140,18 @@ do
                 --save_path "$SAVE_PATH_GT" \
                 --label_mapping "$LABEL_MAPPING" \
                 --scene_io_dir "$SCENE_IO_DIR" \
-                --pose_error_plot \
                 --dynamic_map_keyframes_only \
-                --static_map_keyframes_only \
                 --use_flexcloud "$USE_FLEXCLOUD" \
-                --vis_combined_static_dynamic_pc \
-                --vis_static_frame_comparison \
                 --filter_aggregated_static_map \
                 --filter_static_pc_list \
-                --vis_filtered_aggregated_static
-                #--icp_refinement \
+                --static_map_keyframes_only \
+                --icp_refinement \
+                #--pose_error_plot \
+                #--vis_combined_static_dynamic_pc \
+                #--vis_static_frame_comparison \
+                #--vis_filtered_aggregated_static \
+                #--vis_lidar_visibility \
+                #--vis_camera_visibility
 
         else
             echo "--- Running Part 3 with GLOBAL (all frames) static map ---"
@@ -157,26 +163,28 @@ do
                 --save_path "$SAVE_PATH_GT" \
                 --label_mapping "$LABEL_MAPPING" \
                 --scene_io_dir "$SCENE_IO_DIR" \
-                --pose_error_plot \
                 --dynamic_map_keyframes_only \
-                --static_map_keyframes_only \
                 --use_flexcloud "$USE_FLEXCLOUD" \
-                --vis_combined_static_dynamic_pc \
-                --vis_static_frame_comparison \
                 --filter_aggregated_static_map \
                 --filter_static_pc_list\
-                --vis_filtered_aggregated_static \
-                #--icp_refinement \
+                --icp_refinement \
+                --static_map_keyframes_only \
+                #--vis_filtered_aggregated_static \
+                #--vis_lidar_visibility \
+                #--vis_camera_visibility \
                 #--vis_dyn_unreassigned_points \
                 #--vis_dyn_ambigious_points \
+                #--vis_combined_static_dynamic_pc \
+                #--vis_static_frame_comparison \
+                #--pose_error_plot \
         fi
         conda deactivate
     else
         echo "Skipping Part 2 and 3 for scene $i as it was not in the desired split."
     fi
     # --- (Optional) Clean up the intermediate files for this scene ---
-    #echo "--- Cleaning up intermediate files for scene $i ---"
-    #rm -rf "$SCENE_IO_DIR"
+    echo "--- Cleaning up intermediate files for scene $i ---"
+    rm -rf "$SCENE_IO_DIR"
 
 done
 

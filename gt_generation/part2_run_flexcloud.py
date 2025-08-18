@@ -1,23 +1,31 @@
 import flexcloud_bindings
 import os
 import sys
+import yaml
 
 def main():
     print("--- Running Part 2: FlexCloud Processing ---")
 
-    if len(sys.argv) < 2:
-        print("Error: Please provide the path to the FlexCloud I/O directory.")
+    if len(sys.argv) < 3:
+        print("Error: Please provide the path to the FlexCloud I/O directory and the main config file.")
+        print("Usage: python part2_script.py <path_to_scene_io_dir> <path_to_config.yaml>")
         sys.exit(1)
 
     ######################### Path reference ###############################
     scene_io_dir = sys.argv[1]
     flexcloud_input_dir = os.path.join(scene_io_dir, "flexcloud_io")
+    config_file_path = sys.argv[2]
+
+    print(f"Loading main configuration from {config_file_path}...")
+    with open(config_file_path, 'r') as f:
+        config = yaml.safe_load(f)
 
 
     ########################## Keyframe selection ###########################
 
     ########################## Config #######################################
-    config_path_select_keyframes = "/home/max/Desktop/Masterarbeit/Python/3D_Semantic_Occupancy_TruckScenes/gt_generation/flexcloud/config/select_keyframes.yaml"
+    # config_path_select_keyframes = "/home/max/Desktop/Masterarbeit/Python/3D_Semantic_Occupancy_TruckScenes/gt_generation/flexcloud/config/select_keyframes.yaml"
+    config_path_select_keyframes = config['config_path_select_keyframes']
 
     ################ Path to input files generated in part 1 ################
     pos_dir = os.path.join(flexcloud_input_dir, "gnss_poses")
@@ -47,7 +55,8 @@ def main():
     print("Running Georeferencing...")
 
     ########################### Config ################################
-    config_path_pcd_georef = "/home/max/Desktop/Masterarbeit/Python/3D_Semantic_Occupancy_TruckScenes/gt_generation/flexcloud/config/pcd_georef.yaml"
+    # config_path_pcd_georef = "/home/max/Desktop/Masterarbeit/Python/3D_Semantic_Occupancy_TruckScenes/gt_generation/flexcloud/config/pcd_georef.yaml"
+    config_path_pcd_georef = config['config_path_pcd_georef']
 
     # ref_path_in = os.path.join(output_dir_keyframes, "poseData.txt") # Output from keyframe interpolation
     ref_path_in = os.path.join(flexcloud_input_dir, "all_gnss_data_poses.txt")
