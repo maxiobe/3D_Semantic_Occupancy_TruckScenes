@@ -8,7 +8,7 @@ from .base_loss import BaseLoss
 from .utils.lovasz_softmax import lovasz_softmax
 
 
-nusc_class_frequencies = np.array([
+"""nusc_class_frequencies = np.array([
     944004,
     1897170,
     152386,
@@ -25,9 +25,14 @@ nusc_class_frequencies = np.array([
     51393615,
     61411620,
     105975596,
-    116424404,
     1892500630
-])
+])""" # nuscenes
+
+nusc_class_frequencies = np.array([
+    2074, 1773, 1649, 2639, 182634, 1695, 1390,
+    12813, 34261, 79555, 113309, 896, 182634,
+    3168, 2005, 300000, 500000
+]) # background and free class default labels randomly selected
 
 
 @OPENOCC_LOSS.register_module()
@@ -36,8 +41,8 @@ class OccupancyLoss(BaseLoss):
     def __init__(
         self,
         weight=1.0,
-        empty_label=17,
-        num_classes=18,
+        empty_label=16, # nuscenes 17
+        num_classes=17, # nuscenes 18
         use_focal_loss=False,
         focal_loss_args=dict(),
         use_dice_loss=False,

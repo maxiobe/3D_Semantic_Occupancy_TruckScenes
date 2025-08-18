@@ -64,7 +64,7 @@ loss_input_convertion = dict(
 )
 # ========= model config ===============
 embed_dims = 128
-num_decoder = 2#4
+num_decoder = 3 #nuscenes: 4
 num_single_frame_decoder = 1
 #pc_range = [-50.0, -50.0, -5.0, 50.0, 50.0, 3.0]
 pc_range = [-40, -40, -1, 40, 40, 5.4]

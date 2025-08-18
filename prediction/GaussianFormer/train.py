@@ -177,8 +177,8 @@ def main(local_rank, args):
         17, #17,
         ['barrier', 'bicycle', 'bus', 'car', 'construction_vehicle',
          'motorcycle', 'pedestrian', 'traffic_cone', 'trailer', 'truck',
-         'driveable_surface', 'other_flat', 'sidewalk', 'terrain', 'manmade',
-         'vegetation'],
+         'animal', 'traffic_sign', 'other_vehicle', 'train', 'background',
+         'free'], # different to nuscenes
          True, 17, filter_minmax=False)
     miou_metric.reset()
 

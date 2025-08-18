@@ -11,7 +11,7 @@ class BinaryCrossEntropyLoss(BaseLoss):
     def __init__(
         self,
         weight=1.0,
-        empty_label=17,
+        empty_label=16, # nuscenes 17
         class_weights=[1.0, 1.0],
         input_dict=None
     ):

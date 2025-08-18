@@ -12,6 +12,6 @@
 #ifndef CUDA_RASTERIZER_CONFIG_H_INCLUDED
 #define CUDA_RASTERIZER_CONFIG_H_INCLUDED
 
-#define NUM_CHANNELS 18 // Default 3, RGB
+#define NUM_CHANNELS 17 // Default 3, RGB # nuscenes 18
 
 #endif
