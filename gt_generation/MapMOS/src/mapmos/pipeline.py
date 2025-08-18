@@ -47,6 +47,7 @@ class MapMOSPipeline(OdometryPipeline):
         dataset,
         weights: Path,
         config: Optional[Path] = None,
+        log_dir: Optional[str] = None,
         visualize: bool = False,
         save_ply: bool = False,
         save_kitti: bool = False,
@@ -65,7 +66,7 @@ class MapMOSPipeline(OdometryPipeline):
 
         # Config and output dir
         self.config = load_config(config)
-        self.results_dir = None
+        self.results_dir = log_dir
 
         # Pipeline
         state_dict = {
