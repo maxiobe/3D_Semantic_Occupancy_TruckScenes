@@ -5,7 +5,7 @@ from truckscenes.truckscenes import TruckScenes
 from truckscenes.utils import splits
 
 
-def create_truckscenes_infos(data_root, version):
+def create_truckscenes_infos(data_root, version, save_path):
     """
     Creates the info .pkl file for the TruckScenes dataset.
 
@@ -101,7 +101,8 @@ def create_truckscenes_infos(data_root, version):
                 }
                 data_info[channel] = sensor_dict
 
-            occ_path = os.path.join(data_root, "gts", scene['name'], sample['token'], "labels.npz")
+            #occ_path = os.path.join(data_root, "gts", scene['name'], sample['token'], "labels.npz") #local
+            occ_path = os.path.join(save_path, "gts", scene['name'], sample['token'], "labels.npz")
             is_key_frame = trsc.get('sample_data', sample['data']['LIDAR_LEFT'])['is_key_frame']
             # --- Assemble the complete dictionary for this frame ---
             frame_info = {
@@ -135,7 +136,8 @@ def create_truckscenes_infos(data_root, version):
 
     if version == "v1.0-test":
         test_data = {'infos': all_infos_train, 'metadata': all_metadata_train}
-        output_path_test = os.path.join(data_root, "truckscenes_infos_test_sweeps_occ.pkl")
+        # output_path_test = os.path.join(data_root, "truckscenes_infos_test_sweeps_occ.pkl") # local
+        output_path_test = os.path.join(save_path, "truckscenes_infos_test_sweeps_occ.pkl")
         print(
             f"\nSaving test set with {len(all_infos_train)} scenes and {len(all_metadata_train)} keyframes to {output_path_test}")
         with open(output_path_test, 'wb') as f:
@@ -143,7 +145,8 @@ def create_truckscenes_infos(data_root, version):
     else:
         # Save the training data
         train_data = {'infos': all_infos_train, 'metadata': all_metadata_train}
-        output_path_train = os.path.join(data_root, f"truckscenes_infos_train_sweeps_occ.pkl")
+        #output_path_train = os.path.join(data_root, f"truckscenes_infos_train_sweeps_occ.pkl")
+        output_path_train = os.path.join(save_path, f"truckscenes_infos_train_sweeps_occ.pkl")
         print(
             f"\nSaving train set with {len(all_infos_train)} scenes and {len(all_metadata_train)} keyframes to {output_path_train}")
         with open(output_path_train, 'wb') as f:
@@ -151,7 +154,8 @@ def create_truckscenes_infos(data_root, version):
 
         # Save the validation data
         val_data = {'infos': all_infos_val, 'metadata': all_metadata_val}
-        output_path_val = os.path.join(data_root, f"truckscenes_infos_val_sweeps_occ.pkl")
+        #output_path_val = os.path.join(data_root, f"truckscenes_infos_val_sweeps_occ.pkl")
+        output_path_val = os.path.join(save_path, f"truckscenes_infos_val_sweeps_occ.pkl")
         print(
             f"Saving val set with {len(all_infos_val)} scenes and {len(all_metadata_val)} keyframes to {output_path_val}")
         with open(output_path_val, 'wb') as f:
@@ -163,15 +167,21 @@ def create_truckscenes_infos(data_root, version):
 
 
 if __name__ == '__main__':
+    save_path_base = '/dss/dssfs02/lwp-dss-0001/t7441/t7441-dss-0000/ge84von2'
     #data_root = '/home/max/ssd/Masterarbeit/TruckScenes/mini/v1.0-mini'
-    #version = 'v1.0-mini'
-    data_root = '/home/max/ssd/Masterarbeit/TruckScenes/trainval/v1.0-trainval'
-    version = 'v1.0-trainval'
+    data_root = '/dss/dssfs04/pn69za/pn69za-dss-0004/datasets/man-truckscenes'
+    version = 'v1.0-mini'
+    #data_root = '/home/max/ssd/Masterarbeit/TruckScenes/trainval/v1.0-trainval'
+    # data_root = '/dss/dssfs04/pn69za/pn69za-dss-0004/datasets/man-truckscenes'
+    #version = 'v1.0-trainval'
     #data_root = '/home/max/ssd/Masterarbeit/TruckScenes/test/v1.0-test'
+    # data_root = '/dss/dssfs04/pn69za/pn69za-dss-0004/datasets/man-truckscenes'
     #version = 'v1.0-test'
+    save_path = os.path.join(save_path_base, version)
 
 
     create_truckscenes_infos(
         data_root=data_root,
-        version=version
+        version=version,
+        save_path=save_path
     )
