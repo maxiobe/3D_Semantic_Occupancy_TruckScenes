@@ -659,7 +659,7 @@ def assign_label_by_dual_obb_check(
                 clean_points_forklift_xyz = points_gpu[mask_clean_forklift, :3]
 
                 # Resolve based on distance
-                is_closer_to_trailer = resolve_overlap_by_distance_gpu(
+                is_closer_to_trailer = resolve_overlap_by_distance_gpu_batched(
                     remaining_points_xyz,
                     clean_points_trailer_xyz,
                     clean_points_forklift_xyz
