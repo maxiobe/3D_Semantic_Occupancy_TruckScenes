@@ -481,7 +481,8 @@ class LoadOccupancySurroundOcc(object):
         self.use_sweeps = use_sweeps
         self.perturb = perturb
 
-        xyz = self.get_meshgrid([-40, -40, -1.0, 40, 40, 5.4], [200, 200, 16], 0.4)
+        #xyz = self.get_meshgrid([-40, -40, -1.0, 40, 40, 5.4], [200, 200, 16], 0.4)
+        xyz = self.get_meshgrid([-75, -75, -2.0, 75, 75, 10.8], [750, 750, 64], 0.2)
         self.xyz = np.concatenate([xyz, np.ones_like(xyz[..., :1])], axis=-1) # x, y, z, 4
 
     def get_meshgrid(self, ranges, grid, reso):
@@ -518,7 +519,8 @@ class LoadOccupancySurroundOcc(object):
             results['occ_label'] = dense_label if self.semantic else (dense_label != 16)
             results['occ_cam_mask'] = mask
         elif self.use_sweeps:
-            new_label = np.ones((200, 200, 16), dtype=np.int64) * 16
+            #new_label = np.ones((200, 200, 16), dtype=np.int64) * 16
+            new_label = np.ones((750, 750, 64), dtype=np.int64) * 16
             mask = new_label != 0
             results['occ_label'] = new_label if self.semantic else new_label != 16
             results['occ_cam_mask'] = mask

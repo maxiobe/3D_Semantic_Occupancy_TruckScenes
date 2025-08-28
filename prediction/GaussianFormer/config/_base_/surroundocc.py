@@ -1,9 +1,13 @@
 # ================== data ========================
 #data_root = "data/nuscenes/"
-data_root = "/home/max/ssd/Masterarbeit/TruckScenes/mini/v1.0-mini/"
+# data_root = "/home/max/ssd/Masterarbeit/TruckScenes/mini/v1.0-mini/"
+data_root = "/dss/dssfs04/pn69za/pn69za-dss-0004/datasets/man-truckscenes/"
 #anno_root = "data/nuscenes_cam/"
-anno_root = "/home/max/ssd/Masterarbeit/TruckScenes/mini/v1.0-mini/"
-occ_path = "/home/max/ssd/Masterarbeit/TruckScenes/mini/v1.0-mini/gts/"
+#anno_root = "/home/max/ssd/Masterarbeit/TruckScenes/mini/v1.0-mini/"
+anno_root = "/dss/dssfs02/lwp-dss-0001/t7441/t7441-dss-0000/ge84von2/mini/"
+#occ_path = "/home/max/ssd/Masterarbeit/TruckScenes/mini/v1.0-mini/gts/"
+occ_path = "/dss/dssfs02/lwp-dss-0001/t7441/t7441-dss-0000/ge84von2/mini/gts"
+
 input_shape = (704, 256)
 batch_size = 1
 
