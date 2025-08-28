@@ -12,16 +12,16 @@ ENV_POSTPROCESS="occ_kiss_p3d"
 # For step 1
 CONFIG_PATH="config_truckscenes.yaml"
 LABEL_MAPPING="truckscenes.yaml"
-#SAVE_PATH_GT="/home/max/ssd/Masterarbeit/TruckScenes/trainval/v1.0-trainval/gt/final"
-SAVE_PATH_GT="/home/max/ssd/Masterarbeit/TruckScenes/mini/v1.0-mini/gts_low"
-#DATA_ROOT="/home/max/ssd/Masterarbeit/TruckScenes/trainval/v1.0-trainval"
-DATA_ROOT="/home/max/ssd/Masterarbeit/TruckScenes/mini/v1.0-mini"
-#VERSION="v1.0-trainval"
-VERSION="v1.0-mini"
+SAVE_PATH_GT="/home/max/ssd/Masterarbeit/TruckScenes/trainval/v1.0-trainval/gts_64"
+#SAVE_PATH_GT="/home/max/ssd/Masterarbeit/TruckScenes/mini/v1.0-mini/gts_low_64"
+DATA_ROOT="/home/max/ssd/Masterarbeit/TruckScenes/trainval/v1.0-trainval"
+#DATA_ROOT="/home/max/ssd/Masterarbeit/TruckScenes/mini/v1.0-mini"
+VERSION="v1.0-trainval"
+#VERSION="v1.0-mini"
 #SPLIT="train"
 SPLIT="all"
-START=0
-END=10
+START=543
+END=597
 LOAD_MODE="pointwise"
 
 USE_FLEXCLOUD=0
