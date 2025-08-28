@@ -68,7 +68,7 @@ class InMemoryDataset:
 
         processed_frame = scan[:, :3].astype(np.float64)
 
-        # Ensure C-Contiguity for pybind11 binding
+        # Ensure C-Continuity for pybind11 binding
         if not processed_frame.flags['C_CONTIGUOUS']:
             processed_frame = np.ascontiguousarray(processed_frame)
 
