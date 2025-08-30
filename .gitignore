@@ -215,7 +215,10 @@ gt_generation/results
 gt_generation/pipeline_io
 
 prediction/BEVFormer/work_dirs
+prediction/BEVFormer/data_info
 
 prediction/GaussianFormer/ckpts
 prediction/GaussianFormer/out
 prediction/GaussianFormer/data_info
+
+prediction/SparseOcc/data_info
