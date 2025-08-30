@@ -218,3 +218,4 @@ prediction/BEVFormer/work_dirs
 
 prediction/GaussianFormer/ckpts
 prediction/GaussianFormer/out
+prediction/GaussianFormer/data_info
