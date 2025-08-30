@@ -1,7 +1,7 @@
 # ================== data ========================
 #data_root = "data/nuscenes/"
 # data_root = "/home/max/ssd/Masterarbeit/TruckScenes/mini/v1.0-mini/"
-data_root = "/truckscenes/v1.0-mini/"
+data_root = "/truckscenes/"
 #anno_root = "data/nuscenes_cam/"
 #anno_root = "/home/max/ssd/Masterarbeit/TruckScenes/mini/v1.0-mini/"
 anno_root = "/code/prediction/GaussianFormer/data_info/mini/"
