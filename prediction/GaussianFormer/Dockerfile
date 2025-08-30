@@ -11,6 +11,8 @@ RUN apt-get update && apt-get install -y \
     build-essential \
     git \
     wget \
+    libgl1-mesa-glx \
+    libglib2.0-0 \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Miniconda
@@ -35,9 +37,6 @@ SHELL ["conda", "run", "-n", "gaussianformer", "/bin/bash", "-c"]
 # Install PyTorch
 RUN pip install torch==2.0.0 torchvision==0.15.1 torchaudio==2.0.1 --index-url https://download.pytorch.org/whl/cu118
 
-# Verify the PyTorch and GPU installation
-RUN python -c "import torch; v = torch.__version__; print(f'---> PyTorch version: {v}'); a = torch.cuda.is_available(); print(f'---> GPU available: {a}'); print(f'---> GPU name: {torch.cuda.get_device_name(0)}') if a else print('---> No GPU found')"
-
 # Install OpenMIM and the required MM libraries
 RUN pip install openmim
 RUN mim install mmcv==2.0.1
@@ -54,6 +53,9 @@ WORKDIR /workspace
 
 # Clone the project repository
 RUN git clone https://github.com/maxiobe/3D_Semantic_Occupancy_TruckScenes.git
+
+# Create placeholder directories for mounting data ***
+RUN mkdir -p /truckscenes /data/mini /code
 
 # Set the working directory to the specific sub-project folder
 WORKDIR /workspace/3D_Semantic_Occupancy_TruckScenes/prediction/GaussianFormer

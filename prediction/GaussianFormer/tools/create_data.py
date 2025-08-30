@@ -3,6 +3,7 @@ import pickle
 from tqdm import tqdm
 from truckscenes.truckscenes import TruckScenes
 from truckscenes.utils import splits
+import argparse
 
 
 def create_truckscenes_infos(data_root, version, save_path):
@@ -167,7 +168,22 @@ def create_truckscenes_infos(data_root, version, save_path):
 
 
 if __name__ == '__main__':
-    save_path_base = '/dss/dssfs02/lwp-dss-0001/t7441/t7441-dss-0000/ge84von2'
+    parser = argparse.ArgumentParser(description='Generate TruckScenes info files.')
+    parser.add_argument('--data-root', type=str, required=True,
+                        help='Path to the root of the TruckScenes dataset (e.g., /truckscenes/v1.0-trainval).')
+    parser.add_argument('--save-dir', type=str, required=True,
+                        help='Directory where the output .pkl files will be saved.')
+    parser.add_argument('--version', type=str, required=True,
+                        choices=['v1.0-mini', 'v1.0-trainval', 'v1.0-test'],
+                        help='The dataset version to process.')
+    args = parser.parse_args()
+
+    # Create the save directory if it doesn't exist
+    os.makedirs(args.save_dir, exist_ok=True)
+
+    print(f"Starting data generation for version: {args.version}")
+
+    """save_path_base = '/dss/dssfs02/lwp-dss-0001/t7441/t7441-dss-0000/ge84von2'
     #data_root = '/home/max/ssd/Masterarbeit/TruckScenes/mini/v1.0-mini'
     data_root = '/dss/dssfs04/pn69za/pn69za-dss-0004/datasets/man-truckscenes'
     version = 'v1.0-mini'
@@ -177,11 +193,11 @@ if __name__ == '__main__':
     #data_root = '/home/max/ssd/Masterarbeit/TruckScenes/test/v1.0-test'
     # data_root = '/dss/dssfs04/pn69za/pn69za-dss-0004/datasets/man-truckscenes'
     #version = 'v1.0-test'
-    save_path = os.path.join(save_path_base, version)
+    save_path = os.path.join(save_path_base, version)"""
 
 
     create_truckscenes_infos(
-        data_root=data_root,
-        version=version,
-        save_path=save_path
+        data_root=args.data_root,
+        version=args.version,
+        save_path=args.save_dir
     )
