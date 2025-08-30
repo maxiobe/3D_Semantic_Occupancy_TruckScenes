@@ -6,7 +6,7 @@ from truckscenes.utils import splits
 import argparse
 
 
-def create_truckscenes_infos(data_root, version, save_path):
+def create_truckscenes_infos(data_root, version, save_path, gt_path):
     """
     Creates the info .pkl file for the TruckScenes dataset.
 
@@ -103,7 +103,7 @@ def create_truckscenes_infos(data_root, version, save_path):
                 data_info[channel] = sensor_dict
 
             #occ_path = os.path.join(data_root, "gts", scene['name'], sample['token'], "labels.npz") #local
-            occ_path = os.path.join(save_path, "gts", scene['name'], sample['token'], "labels.npz")
+            occ_path = os.path.join(gt_path, "gts", scene['name'], sample['token'], "labels.npz")
             is_key_frame = trsc.get('sample_data', sample['data']['LIDAR_LEFT'])['is_key_frame']
             # --- Assemble the complete dictionary for this frame ---
             frame_info = {
@@ -176,6 +176,7 @@ if __name__ == '__main__':
     parser.add_argument('--version', type=str, required=True,
                         choices=['v1.0-mini', 'v1.0-trainval', 'v1.0-test'],
                         help='The dataset version to process.')
+    parser.add_argument('--gt_dir', type=str, required=True, help='Path to the occupancy ground truth directory.')
     args = parser.parse_args()
 
     # Create the save directory if it doesn't exist
@@ -199,5 +200,6 @@ if __name__ == '__main__':
     create_truckscenes_infos(
         data_root=args.data_root,
         version=args.version,
-        save_path=args.save_dir
+        save_path=args.save_dir,
+        gt_path=args.gt_dir
     )
