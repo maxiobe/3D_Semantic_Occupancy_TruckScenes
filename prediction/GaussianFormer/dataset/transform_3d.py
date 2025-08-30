@@ -502,6 +502,7 @@ class LoadOccupancySurroundOcc(object):
     def __call__(self, results):
         #label_file = os.path.join(self.occ_path, results['pts_filename'].split('/')[-1]+'.npy')
         #label_file = os.path.join(self.occ_path, scene_folder_name, sample_token, 'labels.npz')
+        print(results)
         label_file = results['occ_path']
 
         print(f"Label file: {label_file}")
