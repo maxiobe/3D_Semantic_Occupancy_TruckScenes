@@ -504,7 +504,7 @@ class LoadOccupancySurroundOcc(object):
         #label_file = os.path.join(self.occ_path, scene_folder_name, sample_token, 'labels.npz')
         label_file = results['occ_path']
 
-        print(label_file)
+        print(f"Label file: {label_file}")
 
         if os.path.exists(label_file):
             npz_data = np.load(label_file) # Added maxiobe
