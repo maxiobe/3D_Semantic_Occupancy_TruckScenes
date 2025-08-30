@@ -103,7 +103,7 @@ def create_truckscenes_infos(data_root, version, save_path, gt_path):
                 data_info[channel] = sensor_dict
 
             #occ_path = os.path.join(data_root, "gts", scene['name'], sample['token'], "labels.npz") #local
-            occ_path = os.path.join(gt_path, "gts", scene['name'], sample['token'], "labels.npz")
+            occ_path = os.path.join(gt_path, scene['name'], sample['token'], "labels.npz")
             is_key_frame = trsc.get('sample_data', sample['data']['LIDAR_LEFT'])['is_key_frame']
             # --- Assemble the complete dictionary for this frame ---
             frame_info = {
