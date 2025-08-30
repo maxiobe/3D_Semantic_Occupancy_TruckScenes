@@ -115,7 +115,7 @@ class NuScenesDataset(Dataset):
         return return_dict
     
     def get_data_info(self, info):
-        server_base_path = '/truckscenes '
+        server_base_path = '/truckscenes'
         f = 0.0055
         image_paths = []
         lidar2img_rts = []
