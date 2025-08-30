@@ -115,7 +115,7 @@ class NuScenesDataset(Dataset):
         return return_dict
     
     def get_data_info(self, info):
-        server_base_path = '/truckscenes'
+        server_base_path = '/truckscenes '
         f = 0.0055
         image_paths = []
         lidar2img_rts = []
@@ -135,7 +135,8 @@ class NuScenesDataset(Dataset):
         ego2global[:3, 3] = np.asarray(info['data']['LIDAR_LEFT']['pose']['translation']).T
 
         for cam_type in self.sensor_types:
-            image_paths.append(os.path.join(self.data_path, info['data'][cam_type]['filename']))
+            #image_paths.append(os.path.join(self.data_path, info['data'][cam_type]['filename']))
+            image_paths.append(os.path.join(server_base_path, info['data'][cam_type]['filename']))
 
             img2global = get_img2global(info['data'][cam_type]['calib'], info['data'][cam_type]['pose'])
             lidar2img = np.linalg.inv(img2global) @ lidar2global
@@ -159,7 +160,8 @@ class NuScenesDataset(Dataset):
             occ_path=info.get("occ_path", ""),
             timestamp=info["timestamp"] / 1e6,
             img_filename=image_paths,
-            pts_filename=os.path.join(self.data_path, info['data']['LIDAR_LEFT']['filename']),
+            #pts_filename=os.path.join(self.data_path, info['data']['LIDAR_LEFT']['filename']),
+            pts_filename=os.path.join(server_base_path, info['data']['LIDAR_LEFT']['filename']),
             ego2lidar=ego2lidar,
             lidar2img=np.asarray(lidar2img_rts),
             ego2img=np.asarray(ego2image_rts),
