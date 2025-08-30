@@ -176,7 +176,7 @@ if __name__ == '__main__':
     parser.add_argument('--version', type=str, required=True,
                         choices=['v1.0-mini', 'v1.0-trainval', 'v1.0-test'],
                         help='The dataset version to process.')
-    parser.add_argument('--gt_dir', type=str, required=True, help='Path to the occupancy ground truth directory.')
+    parser.add_argument('--gt-dir', type=str, required=True, help='Path to the occupancy ground truth directory.')
     args = parser.parse_args()
 
     # Create the save directory if it doesn't exist

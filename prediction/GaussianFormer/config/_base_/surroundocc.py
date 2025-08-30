@@ -1,12 +1,12 @@
 # ================== data ========================
 #data_root = "data/nuscenes/"
 # data_root = "/home/max/ssd/Masterarbeit/TruckScenes/mini/v1.0-mini/"
-data_root = "/data/"
+data_root = "/truckscenes/"
 #anno_root = "data/nuscenes_cam/"
 #anno_root = "/home/max/ssd/Masterarbeit/TruckScenes/mini/v1.0-mini/"
-anno_root = "data/mini/"
+anno_root = "/code/prediction/GaussianFormer/data_info/mini/"
 #occ_path = "/home/max/ssd/Masterarbeit/TruckScenes/mini/v1.0-mini/gts/"
-occ_path = "/data/mini/gts"
+occ_path = "/gts/"
 
 input_shape = (704, 256)
 batch_size = 1
