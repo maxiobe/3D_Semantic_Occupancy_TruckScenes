@@ -81,8 +81,8 @@ xyz_coordinate = 'cartesian'
 phi_activation = 'sigmoid'
 include_opa = True
 #load_from = 'ckpts/r101_dcn_fcos3d_pretrain.pth'
-# load_from = '/code/prediction/GaussianFormer/ckpts/r101_dcn_fcos3d_pretrain.pth'
-load_from = None
+load_from = '/code/prediction/GaussianFormer/ckpts/r101_dcn_fcos3d_pretrain.pth'
+#load_from = None
 semantics = True
 semantic_dim = 16
 
