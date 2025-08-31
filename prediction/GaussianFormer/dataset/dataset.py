@@ -103,27 +103,27 @@ class NuScenesDataset(Dataset):
 
     def __getitem__(self, index):
 
-        print(f"DEBUG: Entering __getitem__ for index {index}", flush=True) #
+        #print(f"DEBUG: Entering __getitem__ for index {index}", flush=True) #
 
         scene_token, index = self.keyframes[index]
         info = deepcopy(self.scene_infos[scene_token][index])
 
-        print("DEBUG: Getting data info...", flush=True) #
+        #print("DEBUG: Getting data info...", flush=True) #
 
         input_dict = self.get_data_info(info)
 
-        print("DEBUG: Data info retrieved.", flush=True) #
+        #print("DEBUG: Data info retrieved.", flush=True) #
 
         if self.data_aug_conf is not None:
-            print("DEBUG: Sampling augmentation...", flush=True) #
+            #print("DEBUG: Sampling augmentation...", flush=True) #
             input_dict["aug_configs"] = self._sample_augmentation()
-            print("DEBUG: Augmentation sampled.", flush=True)  #
+            #print("DEBUG: Augmentation sampled.", flush=True)  #
 
-        """for t in self.pipeline:
-            input_dict = t(input_dict)"""
+        for t in self.pipeline:
+            input_dict = t(input_dict)
 
-        print("DEBUG: Starting pipeline...", flush=True)
-        data = input_dict
+        #print("DEBUG: Starting pipeline...", flush=True)
+        """data = input_dict
         for i, t in enumerate(self.pipeline):
             transform_name = t.__class__.__name__
             print(f"DEBUG: Applying transform [{i}]: {transform_name}", flush=True)
@@ -133,16 +133,15 @@ class NuScenesDataset(Dataset):
             except Exception as e:
                 print(f"FATAL ERROR during transform {transform_name}: {e}", flush=True)
                 # Wir werfen den Fehler erneut, um einen vollständigen Traceback zu erhalten
-                raise e
+                raise e"""
 
-        print("DEBUG: Pipeline finished.", flush=True)
+        #print("DEBUG: Pipeline finished.", flush=True)
         
         return_dict = {k: input_dict[k] for k in self.return_keys}
-        print(f"DEBUG: Returning data for index {index}", flush=True)
+        #print(f"DEBUG: Returning data for index {index}", flush=True)
         return return_dict
     
     def get_data_info(self, info):
-        server_base_path = '/truckscenes'
         f = 0.0055
         image_paths = []
         lidar2img_rts = []
@@ -162,8 +161,7 @@ class NuScenesDataset(Dataset):
         ego2global[:3, 3] = np.asarray(info['data']['LIDAR_LEFT']['pose']['translation']).T
 
         for cam_type in self.sensor_types:
-            #image_paths.append(os.path.join(self.data_path, info['data'][cam_type]['filename']))
-            image_paths.append(os.path.join(server_base_path, info['data'][cam_type]['filename']))
+            image_paths.append(os.path.join(self.data_path, info['data'][cam_type]['filename']))
 
             img2global = get_img2global(info['data'][cam_type]['calib'], info['data'][cam_type]['pose'])
             lidar2img = np.linalg.inv(img2global) @ lidar2global
@@ -187,8 +185,7 @@ class NuScenesDataset(Dataset):
             occ_path=info.get("occ_path", ""),
             timestamp=info["timestamp"] / 1e6,
             img_filename=image_paths,
-            #pts_filename=os.path.join(self.data_path, info['data']['LIDAR_LEFT']['filename']),
-            pts_filename=os.path.join(server_base_path, info['data']['LIDAR_LEFT']['filename']),
+            pts_filename=os.path.join(self.data_path, info['data']['LIDAR_LEFT']['filename']),
             ego2lidar=ego2lidar,
             lidar2img=np.asarray(lidar2img_rts),
             ego2img=np.asarray(ego2image_rts),
