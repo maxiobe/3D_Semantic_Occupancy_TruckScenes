@@ -102,16 +102,43 @@ class NuScenesDataset(Dataset):
         return resize, resize_dims, crop, flip, rotate
 
     def __getitem__(self, index):
+
+        print(f"DEBUG: Entering __getitem__ for index {index}", flush=True) #
+
         scene_token, index = self.keyframes[index]
         info = deepcopy(self.scene_infos[scene_token][index])
+
+        print("DEBUG: Getting data info...", flush=True) #
+
         input_dict = self.get_data_info(info)
 
+        print("DEBUG: Data info retrieved.", flush=True) #
+
         if self.data_aug_conf is not None:
+            print("DEBUG: Sampling augmentation...", flush=True) #
             input_dict["aug_configs"] = self._sample_augmentation()
-        for t in self.pipeline:
-            input_dict = t(input_dict)
+            print("DEBUG: Augmentation sampled.", flush=True)  #
+
+        """for t in self.pipeline:
+            input_dict = t(input_dict)"""
+
+        print("DEBUG: Starting pipeline...", flush=True)
+        data = input_dict
+        for i, t in enumerate(self.pipeline):
+            transform_name = t.__class__.__name__
+            print(f"DEBUG: Applying transform [{i}]: {transform_name}", flush=True)
+            try:
+                data = t(data)
+                print(f"DEBUG: Transform [{i}]: {transform_name} --- SUCCESS", flush=True)
+            except Exception as e:
+                print(f"FATAL ERROR during transform {transform_name}: {e}", flush=True)
+                # Wir werfen den Fehler erneut, um einen vollständigen Traceback zu erhalten
+                raise e
+
+        print("DEBUG: Pipeline finished.", flush=True)
         
         return_dict = {k: input_dict[k] for k in self.return_keys}
+        print(f"DEBUG: Returning data for index {index}", flush=True)
         return return_dict
     
     def get_data_info(self, info):
