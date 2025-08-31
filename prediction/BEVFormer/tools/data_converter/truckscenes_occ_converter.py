@@ -412,7 +412,7 @@ def _fill_occ_trainval_infos(trsc,
 
 
 def create_truckscenes_occ_infos(root_path,
-                          occ_path,
+                          annotation_path,
                           out_path,
                           info_prefix,
                           version='v1.0-trainval',
@@ -450,7 +450,7 @@ def create_truckscenes_occ_infos(root_path,
 
     print("Splits created....")
 
-    with open(os.path.join(occ_path, 'annotations.json'), 'r') as f:
+    with open(os.path.join(annotation_path, 'annotations.json'), 'r') as f:
         occ_anno = json.load(f)
 
     print('File annotations.json loaded....')

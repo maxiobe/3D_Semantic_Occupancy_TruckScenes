@@ -8,7 +8,7 @@ from data_converter import truckscenes_occ_converter as occ_converter
 #### Helper functions
 
 def occ_truckscenes_data_prep(root_path,
-                        occ_path,
+                        annotation_path,
                        info_prefix,
                        version,
                        dataset_name,
@@ -28,25 +28,25 @@ def occ_truckscenes_data_prep(root_path,
         max_sweeps (int): Number of input consecutive frames. Default: 10
     """
     occ_converter.create_truckscenes_occ_infos(
-        root_path, occ_path,out_dir, info_prefix, version=version, max_sweeps=max_sweeps)
+        root_path, annotation_path, out_dir, info_prefix, version=version, max_sweeps=max_sweeps)
 
 ##################################### Parser ####################################
 parser = argparse.ArgumentParser(description='Data converter arg parser')
 parser.add_argument('dataset', metavar='truckscenes', help='name of the dataset')
 parser.add_argument(
-    '--root-path',
+    '--data-root-path',
     type=str,
     default='./data/truckscenes',
     help='Specify the root path of dataset')
 parser.add_argument(
-    '--occ-path',
+    '--annotation-path',
     type=str,
-    default='./data/occ',
+    default='./data/annotation',
     help='Specify the occ path of dataset')
 parser.add_argument(
     '--version',
     type=str,
-    default='v1.0',
+    default='v1.0-trainval',
     required=False,
     help='Specify the dataset version')
 parser.add_argument(
@@ -71,7 +71,7 @@ if __name__ == '__main__':
         train_version = f'{args.version}'
         occ_truckscenes_data_prep(
             root_path=args.root_path,
-            occ_path=args.occ_path,
+            annotation_path=args.annotation_path,
             info_prefix=args.extra_tag,
             version=train_version,
             dataset_name='TruckScenesDataset',
