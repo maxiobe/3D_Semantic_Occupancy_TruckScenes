@@ -8,10 +8,12 @@ plugin_dir = 'projects/mmdet3d_plugin/'
 
 # If point cloud range is changed, the models should also change their point
 # cloud range accordingly
-#point_cloud_range = [-40, -40, -1.0, 40, 40, 5.4]
-point_cloud_range = [-150, -150, -5, 150, 150, 20]
-#voxel_size = [0.2, 0.2, 8]
-voxel_size = [0.2, 0.2, 0.2]
+# point_cloud_range = [-40, -40, -1.0, 40, 40, 5.4]
+#point_cloud_range = [-150, -150, -5, 150, 150, 20]
+point_cloud_range = [-75, -75, -2, 75, 75, 10.8]
+# voxel_size = [0.2, 0.2, 8]
+#voxel_size = [0.2, 0.2, 0.2]
+voxel_size = [0.2, 0.2, 16]
 
 
 
@@ -31,15 +33,16 @@ input_modality = dict(
     use_external=True)
 
 _dim_ = 256
-#_dim_ = 128
 _pos_dim_ = _dim_//2
 _ffn_dim_ = _dim_*2
 _num_levels_ = 2
-bev_h_ = 200
+#bev_h_ = 200
 #bev_h_ = 1500
-bev_w_ = 200
-bev_w_ = 1500
-queue_length = 2 # each sequence contains `queue_length` frames.
+bev_h_ = 750
+#bev_w_ = 200
+#bev_w_ = 1500
+bev_w_ = 750
+queue_length = 4 # each sequence contains `queue_length` frames.
 model = dict(
     type='BEVFormerOcc',
     use_grid_mask=True,
@@ -68,7 +71,7 @@ model = dict(
         pc_range=point_cloud_range,
         bev_h=bev_h_,
         bev_w=bev_w_,
-        num_classes=18,
+        num_classes=17,
         in_channels=_dim_,
         sync_cls_avg_factor=True,
         with_box_refine=True,
@@ -87,8 +90,9 @@ model = dict(
         transformer=dict(
             type='TransformerOcc',
             #pillar_h=16,
-            pillar_h=125,
-            num_classes=18,
+            #pillar_h=125,
+            pillar_h=64,
+            num_classes=17,
             num_cams=4,
             norm_cfg=dict(type='BN', ),
             norm_cfg_3d=dict(type='BN3d', ),
@@ -149,9 +153,12 @@ model = dict(
             pc_range=point_cloud_range)))))
 
 dataset_type = 'NuSceneOcc'
-data_root = '/home/max/ssd/Masterarbeit/TruckScenes/mini/v1.0-mini/'
+# data_root = '/home/max/ssd/Masterarbeit/TruckScenes/mini/v1.0-mini/'
+data_root = '/truckscenes/'
 file_client_args = dict(backend='disk')
-occ_gt_data_root='/home/max/ssd/Masterarbeit/TruckScenes/mini/v1.0-mini/'
+# occ_gt_data_root='/home/max/ssd/Masterarbeit/TruckScenes/mini/v1.0-mini/'
+occ_gt_data_root = '/gts/'
+anno_root = '/code/prediction/BEVFormer/data_info/mini/'
 
 train_pipeline = [
     dict(type='LoadMultiViewImageFromFiles', to_float32=True),
@@ -192,7 +199,8 @@ data = dict(
     train=dict(
         type=dataset_type,
         data_root=data_root,
-        ann_file=data_root + 'occ_infos_temporal_train.pkl',
+        #ann_file=data_root + 'occ_infos_temporal_train.pkl',
+        ann_file=anno_root + 'occ_infos_temporal_train.pkl',
         pipeline=train_pipeline,
         classes=class_names,
         modality=input_modality,
@@ -205,13 +213,14 @@ data = dict(
         box_type_3d='LiDAR'),
     val=dict(type=dataset_type,
              data_root=data_root,
-             ann_file=data_root + 'occ_infos_temporal_val.pkl',
+             #ann_file=data_root + 'occ_infos_temporal_val.pkl',
+             ann_file=anno_root + 'occ_infos_temporal_val.pkl',
              pipeline=test_pipeline,  bev_size=(bev_h_, bev_w_),
              classes=class_names, modality=input_modality, samples_per_gpu=1),
     test=dict(type=dataset_type,
               data_root=data_root,
-
-              ann_file=data_root + 'occ_infos_temporal_val.pkl',
+              #ann_file=data_root + 'occ_infos_temporal_val.pkl',
+              ann_file=anno_root + 'occ_infos_temporal_val.pkl',
               pipeline=test_pipeline, bev_size=(bev_h_, bev_w_),
               classes=class_names, modality=input_modality),
     shuffler_sampler=dict(type='DistributedGroupSampler'),
@@ -219,7 +228,7 @@ data = dict(
 )
 optimizer = dict(
     type='AdamW',
-    lr=2e-4,
+    lr=2e-4, # 2e-4
     paramwise_cfg=dict(
         custom_keys={
             'img_backbone': dict(lr_mult=0.1),
@@ -238,7 +247,8 @@ total_epochs = 24
 evaluation = dict(interval=1, pipeline=test_pipeline)
 
 runner = dict(type='EpochBasedRunner', max_epochs=total_epochs)
-load_from = 'ckpts/r101_dcn_fcos3d_pretrain.pth'
+# load_from = 'ckpts/r101_dcn_fcos3d_pretrain.pth'
+load_from = '/code/prediction/BEVFormer/ckpts/r101_dcn_fcos3d_pretrain.pth'
 log_config = dict(
     interval=50,
     hooks=[
