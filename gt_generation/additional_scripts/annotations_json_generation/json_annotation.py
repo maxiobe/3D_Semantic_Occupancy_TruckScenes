@@ -5,18 +5,22 @@ from tqdm import tqdm
 import os
 
 # Trainval
-#  = '/home/max/ssd/Masterarbeit/TruckScenes/trainval/v1.0-trainval'
-# TRUCKSCENES_VERSION = 'v1.0-trainval'
+TRUCKSCENES_DATA_ROOT = '/home/max/ssd/Masterarbeit/TruckScenes/trainval/v1.0-trainval'
+TRUCKSCENES_VERSION = 'v1.0-trainval'
+
+OUTPUT_FILENAME = '/home/max/Desktop/Masterarbeit/Python/3D_Semantic_Occupancy_TruckScenes/prediction/BEVFormer/data_info/trainval/annotations.json'
 
 # Test
 #TRUCKSCENES_DATA_ROOT = '/home/max/ssd/Masterarbeit/TruckScenes/test/v1.0-test'
 #TRUCKSCENES_VERSION = 'v1.0-test'
 
-# Mini
-TRUCKSCENES_DATA_ROOT = '/home/max/ssd/Masterarbeit/TruckScenes/mini/v1.0-mini'
-TRUCKSCENES_VERSION = 'v1.0-mini'
+#OUTPUT_FILENAME = '/home/max/Desktop/Masterarbeit/Python/3D_Semantic_Occupancy_TruckScenes/prediction/BEVFormer/data_info/test/annotations.json'
 
-OUTPUT_FILENAME = 'annotations.json'
+# Mini
+#TRUCKSCENES_DATA_ROOT = '/home/max/ssd/Masterarbeit/TruckScenes/mini/v1.0-mini'
+#TRUCKSCENES_VERSION = 'v1.0-mini'
+
+#OUTPUT_FILENAME = '/home/max/Desktop/Masterarbeit/Python/3D_Semantic_Occupancy_TruckScenes/prediction/BEVFormer/data_info/mini/annotations.json'
 
 def main():
     if TRUCKSCENES_VERSION == 'v1.0-mini':
@@ -47,7 +51,7 @@ def main():
 
             sample_token_next = sample_record['next']
             sample_token_previous = sample_record['prev']
-            gt_path_sample = f"gts/{scene_name}/{sample_token}/labels.npz"
+            gt_path_sample = f"/gts/{scene_name}/{sample_token}/labels.npz"
             timestamp = sample_record['timestamp']
             ego_pose_record = trucksc.getclosest('ego_pose', timestamp)
             ego_pose = {
