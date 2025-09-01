@@ -70,7 +70,7 @@ if __name__ == '__main__':
     if args.dataset == 'occ':
         train_version = f'{args.version}'
         occ_truckscenes_data_prep(
-            root_path=args.root_path,
+            root_path=args.data_root_path,
             annotation_path=args.annotation_path,
             info_prefix=args.extra_tag,
             version=train_version,
