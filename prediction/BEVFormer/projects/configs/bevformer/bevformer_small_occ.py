@@ -32,7 +32,7 @@ input_modality = dict(
     use_map=False,
     use_external=True)
 
-_dim_ = 256 #256
+_dim_ = 128 #256
 _pos_dim_ = _dim_//2
 _ffn_dim_ = _dim_*2
 _num_levels_ = 2
@@ -127,6 +127,8 @@ model = dict(
                             embed_dims=_dim_,
                         )
                     ],
+                    feedforward_channels=_ffn_dim_,
+                    ffn_dropout=0.1,
                     ffn_cfgs=dict(
                         type='FFN',
                         embed_dims=_dim_,  # This is the crucial line that fixes the error
@@ -135,8 +137,6 @@ model = dict(
                         ffn_drop=0.1,
                         act_cfg=dict(type='ReLU', inplace=True),
                     ),
-                    #feedforward_channels=_ffn_dim_,
-                    #ffn_dropout=0.1,
                     operation_order=('self_attn', 'norm', 'cross_attn', 'norm',
                                      'ffn', 'norm'))),
         ),
