@@ -1,11 +1,17 @@
 dataset_type = 'NuSceneOcc'
-dataset_root = 'data/nuscenes/'
-occ_gt_root = 'data/nuscenes/occ3d'
+# dataset_root = 'data/nuscenes/'
+dataset_root = '/truckscenes/'
+# occ_gt_root = 'data/nuscenes/occ3d'
+occ_gt_root = '/gts/'
+
+anno_root = '/code/prediction/SparseOcc/data_info/mini/'
 
 # If point cloud range is changed, the models should also change their point
 # cloud range accordingly
-point_cloud_range = [-40, -40, -1.0, 40, 40, 5.4]
-occ_size = [200, 200, 16]
+# point_cloud_range = [-40, -40, -1.0, 40, 40, 5.4]
+point_cloud_range = [-75, -75, -2.0, 75, 75, 10.8]
+# occ_size = [200, 200, 16]
+occ_size = [750, 750, 64]
 
 img_norm_cfg = dict(
     mean=[123.675, 116.280, 103.530],
@@ -19,11 +25,18 @@ det_class_names = [
     'motorcycle', 'bicycle', 'pedestrian', 'traffic_cone'
 ]
 
-occ_class_names = [
+"""occ_class_names = [
     'others', 'barrier', 'bicycle', 'bus', 'car', 'construction_vehicle',
     'motorcycle', 'pedestrian', 'traffic_cone', 'trailer', 'truck',
     'driveable_surface', 'other_flat', 'sidewalk',
     'terrain', 'manmade', 'vegetation', 'free'
+]"""
+
+occ_class_names = [
+    'noise', 'barrier', 'bicycle', 'bus', 'car', 'construction_vehicle',
+    'motorcycle', 'pedestrian', 'traffic_cone', 'trailer', 'truck',
+    'animal', 'traffic_sign', 'other_vehicle',
+    'train', 'background', 'free'
 ]
 
 input_modality = dict(
@@ -152,7 +165,8 @@ data = dict(
         type=dataset_type,
         data_root=dataset_root,
         occ_gt_root=occ_gt_root,
-        ann_file=dataset_root + 'nuscenes_infos_train_sweep.pkl',
+        # ann_file=dataset_root + 'nuscenes_infos_train_sweep.pkl',
+        ann_file=anno_root + 'truckscenes_infos_train_sweep.pkl',
         pipeline=train_pipeline,
         classes=det_class_names,
         modality=input_modality,
@@ -162,7 +176,8 @@ data = dict(
         type=dataset_type,
         data_root=dataset_root,
         occ_gt_root=occ_gt_root,
-        ann_file=dataset_root + 'nuscenes_infos_val_sweep.pkl',
+        #ann_file=dataset_root + 'nuscenes_infos_val_sweep.pkl',
+        ann_file=anno_root + 'truckscenes_infos_val_sweep.pkl',
         pipeline=test_pipeline,
         classes=det_class_names,
         modality=input_modality,
@@ -172,7 +187,8 @@ data = dict(
         type=dataset_type,
         data_root=dataset_root,
         occ_gt_root=occ_gt_root,
-        ann_file=dataset_root + 'nuscenes_infos_test_sweep.pkl',
+        #ann_file=dataset_root + 'nuscenes_infos_test_sweep.pkl',
+        ann_file=anno_root + 'truckscenes_infos_test_sweep.pkl',
         pipeline=test_pipeline,
         classes=det_class_names,
         modality=input_modality,
@@ -205,7 +221,8 @@ total_epochs = 24
 batch_size = 8
 
 # load pretrained weights
-load_from = 'pretrain/cascade_mask_rcnn_r50_fpn_coco-20e_20e_nuim_20201009_124951-40963960.pth'
+# load_from = 'pretrain/cascade_mask_rcnn_r50_fpn_coco-20e_20e_nuim_20201009_124951-40963960.pth'
+load_from = '/code/prediction/SparseOcc/pretrain/cascade_mask_rcnn_r50_fpn_coco-20e_20e_nuim_20201009_124951-40963960.pth'
 revise_keys = [('backbone', 'img_backbone')]
 
 # resume the last training
