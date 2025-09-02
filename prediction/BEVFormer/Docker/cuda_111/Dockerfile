@@ -13,6 +13,8 @@ RUN apt-get update && apt-get install -y \
     build-essential \
     ca-certificates \
     ninja-build \
+    libgl1-mesa-glx \
+    libglib2.0-0 \
     && rm -rf /var/lib/apt/lists/*
 
 # Set comprehensive environment variables for the CUDA toolkit.
@@ -21,10 +23,8 @@ ENV PATH="/usr/local/cuda/bin:${PATH}"
 ENV LD_LIBRARY_PATH="/usr/local/cuda/lib64:${LD_LIBRARY_PATH}"
 ENV CPLUS_INCLUDE_PATH="/usr/local/cuda/include:${CPLUS_INCLUDE_PATH}"
 
-# === FINAL FIX: Manually specify CUDA architectures ===
-# This prevents the build script from failing when it can't auto-detect a GPU.
-# We are including common architectures like Turing (7.5) and Ampere (8.0, 8.6).
-ENV TORCH_CUDA_ARCH_LIST="7.5 8.0 8.6"
+# 8.0 for A100, 8.6 for local RTX 30-series
+ENV TORCH_CUDA_ARCH_LIST="7.0 7.5 8.0 8.6"
 
 # Tell the MMLab build systems to force CUDA compilation
 ENV FORCE_CUDA="1"
@@ -58,10 +58,6 @@ RUN pip install mmcv-full==1.4.0 -f https://download.openmmlab.com/mmcv/dist/cu1
 # 3. Install mmdetection and mmsegmentation
 RUN pip install mmdet==2.14.0 mmsegmentation==0.14.1
 
-# 4. Copy and install the remaining packages from requirements.txt
-COPY requirements.txt .
-RUN pip install -r requirements.txt
-
 # --- Clone and Install mmdetection3d ---
 
 # Set a working directory for our projects
@@ -74,6 +70,13 @@ RUN git checkout v0.17.1
 
 # Install mmdetection3d in editable mode
 RUN pip install -e .
+
+# 4. Copy and install the remaining packages from requirements.txt
+WORKDIR /workspace
+COPY requirements.txt .
+RUN pip install -r requirements.txt
+
+
 
 # Set the final working directory
 WORKDIR /workspace
