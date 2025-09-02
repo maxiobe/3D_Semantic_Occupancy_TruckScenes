@@ -222,3 +222,4 @@ prediction/GaussianFormer/out
 prediction/GaussianFormer/data_info
 
 prediction/SparseOcc/data_info
+prediction/SparseOcc/pretrain
