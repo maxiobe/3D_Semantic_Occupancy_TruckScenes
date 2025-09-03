@@ -1,35 +1,22 @@
 name: occ_kiss_p3d
 channels:
-  #- pytorch3d
-  - nvidia
-  - anaconda
   - conda-forge
+  - anaconda
+  - defaults
+
 dependencies:
   # --- Core ---
   - python=3.9
   - pip
   - numpy <2
-  - mkl-devel
-  - setuptools <65 #setuptools==64.0.3
-  - openblas-devel
+  - setuptools <65
+  - openblas
 
   # --- Key Libraries ---
-  #- pytorch3d
-  - open3d=0.19.0
   - opencv
+  - libstdcxx-ng
   - pyyaml
   - scipy
   - tqdm
   - cmake
   - ninja
-
-  # --- Other Conda packages if needed ---
-  # Add other important packages here...
-
-  # --- Pip Dependencies ---
-  - pip:
-    - addict
-    - iopath
-    - mmcv-full==1.7.2
-    - truckscenes-devkit==1.0.0 #1.0.0
-    - pyquaternion==0.9.9 #0.9.9
