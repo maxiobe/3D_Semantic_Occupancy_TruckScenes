@@ -31,5 +31,5 @@ dependencies:
     - addict
     - iopath
     - mmcv-full==1.7.2
-    - truckscenes-devkit #1.0.0
-    - pyquaternion #0.9.9
+    - truckscenes-devkit==1.0.0 #1.0.0
+    - pyquaternion==0.9.9 #0.9.9
