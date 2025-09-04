@@ -213,6 +213,7 @@ prediction/BEVFormer/ckpts/
 gt_generation/results
 
 gt_generation/pipeline_io
+gt_generation/ckpts
 
 prediction/BEVFormer/work_dirs
 prediction/BEVFormer/data_info
