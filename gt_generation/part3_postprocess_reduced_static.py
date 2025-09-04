@@ -19,7 +19,7 @@ from pyquaternion import Quaternion
 from utils.occupancy_utils import calculate_camera_visibility_gpu_host, calculate_lidar_visibility_gpu_host
 from utils.pointcloud_processing import in_range_mask
 from utils.constants import CLASS_COLOR_MAP, STATE_FREE, STATE_UNOBSERVED, STATE_OCCUPIED, DEFAULT_COLOR
-from utils.refinement import assign_label_by_L_shape, assign_label_by_dual_obb_check
+from utils.refinement import assign_label_by_dual_obb_check #assign_label_by_L_shape,
 from utils.bbox_utils import is_point_centroid_z_similar, are_box_sizes_similar, get_object_overlap_signature_BATCH, \
     compare_signatures_class_based_OVERLAP_RATIO
 from utils.geometry_utils import transform_points
