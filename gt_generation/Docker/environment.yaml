@@ -20,3 +20,4 @@ dependencies:
   - tqdm
   - cmake
   - ninja
+  - numba=0.60.0
