@@ -22,7 +22,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libavcodec-dev \
     libavformat-dev \
     libswscale-dev \
-    libtheora-dev && \
+    libtheora-dev \
+    libopenblas-dev && \
     # Download and install NVIDIA CUB
     wget https://github.com/NVIDIA/cub/archive/1.17.2.zip -O cub.zip && \
     unzip cub.zip -d /opt && \
@@ -56,6 +57,9 @@ RUN conda clean --all --yes && \
 # CRITICAL FIX: Force the system's dynamic linker to prioritize the Conda C++ library.
 # This solves the `CXXABI_1.3.15 not found` runtime error.
 ENV LD_LIBRARY_PATH=/opt/conda/envs/occ_kiss_p3d/lib:$LD_LIBRARY_PATH
+ENV TORCH_CUDA_ARCH_LIST="7.5 8.0 8.6+PTX"
+ENV CUDA_HOME=/usr/local/cuda
+ENV FORCE_CUDA=1
 
 # 2. Install PyTorch using Pip.
 RUN conda run -n occ_kiss_p3d pip install torch==2.1.0 torchvision==0.16.0 torchaudio==2.1.0 --index-url https://download.pytorch.org/whl/cu118
@@ -77,9 +81,25 @@ RUN conda run -n occ_kiss_p3d pip install \
 RUN conda run -n occ_kiss_p3d pip install mmcv-full==1.7.2 -f https://download.openmmlab.com/mmcv/dist/cu118/torch2.1.0/index.html
 
 # 6. Build MinkowskiEngine, forcing CUDA compilation.
-RUN conda run -n occ_kiss_p3d sh -c '\
-    MINKOWSKI_FORCE_CUDA=1 pip install -U MinkowskiEngine --config-settings="--build-option=--blas=openblas" --no-deps --no-build-isolation \
-    '
+#RUN conda run -n occ_kiss_p3d pip install MinkowskiEngine -f https://nvidia-minkowskiengine.s3.amazonaws.com/whl/torch-2.1.0_cu118.html
+#RUN conda run -n occ_kiss_p3d pip install -U git+https://github.com/NVIDIA/MinkowskiEngine --no-build-isolation
+#RUN conda run -n occ_kiss_p3d sh -c '\
+#    MINKOWSKI_FORCE_CUDA=1 pip install -U MinkowskiEngine --config-settings="--build-option=--blas=openblas" --no-deps --no-build-isolation \
+#    '
+#RUN conda run -n occ_kiss_p3d sh -c '\
+#    FORCE_CUDA=1 python -m pip install -U git+https://github.com/NVIDIA/MinkowskiEngine.git \
+#    --no-build-isolation --no-deps \
+#'
+# Install compiler toolchain into the conda env (so it links against the right libstdc++)
+#RUN conda install -n occ_kiss_p3d -c conda-forge gxx_linux-64=12 cmake ninja
+
+# Build MinkowskiEngine from source with CUDA enabled
+#RUN conda run -n occ_kiss_p3d bash -c '\
+ #   export FORCE_CUDA=1 && \
+  #  export CUDA_HOME=/usr/local/cuda && \
+  #  export TORCH_CUDA_ARCH_LIST="7.5 8.0 8.6+PTX" && \
+  #  pip install -U git+https://github.com/NVIDIA/MinkowskiEngine.git --no-build-isolation --no-deps \
+#'
 
 # --- YOUR LOCAL CODE GOES LAST ---
 
