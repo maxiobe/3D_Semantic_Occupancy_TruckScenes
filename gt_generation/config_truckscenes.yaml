@@ -79,8 +79,8 @@ ror_radius_far: 0.5
 moving_object_velocity_threshold_ms: 0.2
 
 # MapMOS weight path
-#weights_path_mapmos: "/app/ckpts/mapmos.ckpt"
-weights_path_mapmos: "/home/max/Desktop/Masterarbeit/Python/3D_Semantic_Occupancy_TruckScenes/gt_generation/ckpts/mapmos.ckpt"
+weights_path_mapmos: "/code/ckpts/mapmos.ckpt"
+eights_path_mapmos: "/home/max/Desktop/Masterarbeit/Python/3D_Semantic_Occupancy_TruckScenes/gt_generation/ckpts/mapmos.ckpt"
 
 # Kiss-ICP
 kiss_icp_config_path: "kiss_config.yaml"
