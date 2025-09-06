@@ -138,7 +138,7 @@ def resolve_overlap_by_distance_gpu_batched(
         ambiguous_points_xyz: torch.Tensor,
         clean_points_1_xyz: torch.Tensor,
         clean_points_2_xyz: torch.Tensor,
-        batch_size: int = 4096 # Process 4096 ambiguous points at a time
+        batch_size: int = 1024 # Process 4096 ambiguous points at a time
 ) -> torch.Tensor:
     """
     Resolves ambiguity by distance to nearest "clean" cluster, using BATCHING to conserve memory.
@@ -182,6 +182,56 @@ def resolve_overlap_by_distance_gpu_batched(
     # Compare the final minimum distances for all points
     return min_dists_c1 < min_dists_c2
 
+
+def resolve_overlap_by_distance_gpu_batched_robust(
+        ambiguous_points_xyz: torch.Tensor,
+        clean_points_1_xyz: torch.Tensor,
+        clean_points_2_xyz: torch.Tensor,
+        batch_size: int = 4096,
+        clean_batch_size: int = 16384  # Add a new batch size for the clean points
+) -> torch.Tensor:
+    # Handle edge cases where one cluster might be empty
+    if clean_points_1_xyz.shape[0] == 0:
+        return torch.zeros(ambiguous_points_xyz.shape[0], dtype=torch.bool, device=ambiguous_points_xyz.device)
+    if clean_points_2_xyz.shape[0] == 0:
+        return torch.ones(ambiguous_points_xyz.shape[0], dtype=torch.bool, device=ambiguous_points_xyz.device)
+
+    print(f"Clean 1: {clean_points_1_xyz.shape}, Clean 2: {clean_points_2_xyz.shape}")
+    print(f"Ambigious points: {ambiguous_points_xyz.shape}")
+
+    num_ambiguous = ambiguous_points_xyz.shape[0]
+    min_dists_c1 = torch.full((num_ambiguous,), float('inf'), device=ambiguous_points_xyz.device)
+    min_dists_c2 = torch.full((num_ambiguous,), float('inf'), device=ambiguous_points_xyz.device)
+
+    # Process ambiguous points in batches
+    for i in range(0, num_ambiguous, batch_size):
+        batch_end = min(i + batch_size, num_ambiguous)
+        batch_points = ambiguous_points_xyz[i:batch_end]
+
+        # --- MODIFICATION FOR ROBUSTNESS ---
+
+        # Calculate min distance to cluster 1 by batching through clean_points_1
+        batch_min_c1 = torch.full((batch_points.shape[0],), float('inf'), device=batch_points.device)
+        for j in range(0, clean_points_1_xyz.shape[0], clean_batch_size):
+            clean_batch_1 = clean_points_1_xyz[j:min(j + clean_batch_size, clean_points_1_xyz.shape[0])]
+            dist_to_c1_sub_batch = torch.cdist(batch_points, clean_batch_1)
+            # Find the minimum distance for this sub-batch and update if it's smaller
+            current_min_c1, _ = torch.min(dist_to_c1_sub_batch, dim=1)
+            batch_min_c1 = torch.min(batch_min_c1, current_min_c1)
+        min_dists_c1[i:batch_end] = batch_min_c1
+
+        # Calculate min distance to cluster 2 by batching through clean_points_2
+        batch_min_c2 = torch.full((batch_points.shape[0],), float('inf'), device=batch_points.device)
+        for j in range(0, clean_points_2_xyz.shape[0], clean_batch_size):
+            clean_batch_2 = clean_points_2_xyz[j:min(j + clean_batch_size, clean_points_2_xyz.shape[0])]
+            dist_to_c2_sub_batch = torch.cdist(batch_points, clean_batch_2)
+            # Find the minimum distance for this sub-batch and update
+            current_min_c2, _ = torch.min(dist_to_c2_sub_batch, dim=1)
+            batch_min_c2 = torch.min(batch_min_c2, current_min_c2)
+        min_dists_c2[i:batch_end] = batch_min_c2
+
+    # Compare the final minimum distances for all points
+    return min_dists_c1 < min_dists_c2
 
 def _resolve_truck_overlap_with_dual_obb(
     points_to_process: torch.Tensor,
