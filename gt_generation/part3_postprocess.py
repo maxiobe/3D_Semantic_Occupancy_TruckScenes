@@ -739,7 +739,7 @@ def main(args):
                     original_count = points_in_scene_xyz.shape[0]
 
                     # Only filter if there are points to filter
-                    if original_count > 0:
+                    """if original_count > 0:
                         # Prepare tensors for the operation
                         points_tensor_gpu = torch.from_numpy(points_in_scene_xyz[np.newaxis, :, :]).float().to(device)
                         box_tensor_gpu = torch.from_numpy(bbox_for_filtering[np.newaxis, :, :]).float().to(device)
@@ -754,6 +754,44 @@ def main(args):
                         # Apply the corrected and safe NumPy mask
                         points_in_scene_xyz = points_in_scene_xyz[points_in_box_mask_numpy]
                         sids_for_points = sids_for_points[points_in_box_mask_numpy]
+
+                        filtered_count = points_in_scene_xyz.shape[0]
+                        if original_count > filtered_count:
+                            print(
+                                f"      [Final Clip] Object {class_name}: Clipped aggregated points from {original_count} to {filtered_count}.")""" # Use cpu version as this throws a cuda error for some scenes
+
+                    if original_count > 0:
+
+                        #print(points_in_scene_xyz.shape)
+                        #print(bbox_for_filtering.shape)
+
+                        points_tensor_cpu = torch.from_numpy(points_in_scene_xyz[np.newaxis, :, :]).float()  # (1, N, 3)
+                        #print(points_tensor_cpu.shape)
+
+                        box_tensor_cpu = torch.from_numpy(bbox_for_filtering[np.newaxis, :, :]).float()  # (1, M, 7)
+                        #print(box_tensor_cpu.shape)
+
+                        point_indices = points_in_boxes_cpu(points_tensor_cpu, box_tensor_cpu)[0]  # (N,)
+                        #print(point_indices.shape)
+
+                        if point_indices.ndim == 2:
+                            # keep point if it belongs to any box
+                            points_in_box_mask = (point_indices > 0).any(axis=1)  # (N,)
+                        else:
+                            points_in_box_mask = (point_indices > 0)  # already (N,)
+
+                        #print("points_in_box_mask.shape:", points_in_box_mask.shape)
+
+                        if points_in_box_mask.ndim == 0:
+                            # If the mask is a single value (scalar), put it into a 1-element array
+                            points_in_box_mask = torch.tensor([points_in_box_mask.item()],
+                                                              device=points_in_box_mask.device)
+
+                        mask_for_indexing = points_in_box_mask.cpu().numpy()
+
+                        # Apply mask on the *transposed* array
+                        points_in_scene_xyz = points_in_scene_xyz[mask_for_indexing]
+                        sids_for_points = sids_for_points[mask_for_indexing]
 
                         filtered_count = points_in_scene_xyz.shape[0]
                         if original_count > filtered_count:
