@@ -241,6 +241,11 @@ def main(local_rank, args):
                     epoch, i_iter, len(train_dataset_loader), 
                     loss.item(), np.mean(loss_list), grad_norm, lr,
                     time_e - time_s, data_time_e - data_time_s))
+
+                if writer is not None: # Added for logging
+                    writer.add_scalar('Train/loss_step', loss.item(), global_iter)
+                    writer.add_scalar('Train/learning_rate', lr, global_iter)
+
                 detailed_loss = []
                 for loss_name, loss_value in loss_dict.items():
                     detailed_loss.append(f'{loss_name}: {loss_value:.5f}')
@@ -329,6 +334,12 @@ def main(local_rank, args):
         miou, iou2 = miou_metric._after_epoch()
         logger.info(f'mIoU: {miou}, iou2: {iou2}')
         logger.info('Current val loss is %.3f' % (np.mean(val_loss_list)))
+
+        if writer is not None: # Add logging
+            writer.add_scalar('Eval/loss_epoch', np.mean(val_loss_list), epoch)
+            writer.add_scalar('Eval/mIoU', miou, epoch)
+            writer.add_scalar('Eval/iou2', iou2, epoch)
+
         miou_metric.reset()
     
     if writer is not None:
