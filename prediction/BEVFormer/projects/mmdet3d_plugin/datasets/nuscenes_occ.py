@@ -206,6 +206,8 @@ class NuSceneOcc(NuScenesDataset):
             return data
 
     def evaluate_miou(self, occ_results, runner=None, show_dir=None, **eval_kwargs):
+
+        #show_dir = '/home/max/Desktop/Masterarbeit/BEVFormer_Test'
         if show_dir is not None:
             if not os.path.exists(show_dir):
                 os.mkdir(show_dir)
@@ -213,9 +215,9 @@ class NuSceneOcc(NuScenesDataset):
             begin=eval_kwargs.get('begin',None)
             end=eval_kwargs.get('end',None)
         self.occ_eval_metrics = Metric_mIoU(
-            num_classes=18,
+            num_classes=17,
             use_lidar_mask=False,
-            use_image_mask=True)
+            use_image_mask=False) # True
         if self.eval_fscore:
             self.fscore_eval_metrics = Metric_FScore(
                 leaf_size=10,
@@ -237,11 +239,11 @@ class NuSceneOcc(NuScenesDataset):
                     if index>= begin and index<end:
                         sample_token = info['token']
                         save_path = os.path.join(show_dir,str(index).zfill(4))
-                        np.savez_compressed(save_path, pred=occ_pred, gt=occ_gt, sample_token=sample_token)
+                        np.savez_compressed(save_path, pred=occ_pred, gt=occ_gt['semantics'], sample_token=sample_token)
                 else:
                     sample_token=info['token']
                     save_path=os.path.join(show_dir,str(index).zfill(4))
-                    np.savez_compressed(save_path,pred=occ_pred,gt=occ_gt,sample_token=sample_token)
+                    np.savez_compressed(save_path,pred=occ_pred,gt=occ_gt['semantics'],sample_token=sample_token)
 
 
             gt_semantics = occ_gt['semantics']
@@ -252,9 +254,25 @@ class NuSceneOcc(NuScenesDataset):
             if self.eval_fscore:
                 self.fscore_eval_metrics.add_batch(occ_pred, gt_semantics, mask_lidar, mask_camera)
 
-        self.occ_eval_metrics.count_miou()
+        #self.occ_eval_metrics.count_miou()
+
+        # Added
+        # Calculate metrics and get the returned values
+        mean_iou, per_class_iou = self.occ_eval_metrics.count_miou()
+
+        # Create the results dictionary that the logger needs
+        eval_results = dict()
+        eval_results['mIoU'] = mean_iou
+
+        # Optional: Add per-class IoU to the logs as well
+        for key, val in per_class_iou.items():
+            eval_results[f'IoU/{key}'] = val
+
         if self.eval_fscore:
             self.fscore_eval_metrics.count_fscore()
+
+        # Return the dictionary
+        return eval_results
 
     def format_results(self, occ_results,submission_prefix,**kwargs):
         if submission_prefix is not None:

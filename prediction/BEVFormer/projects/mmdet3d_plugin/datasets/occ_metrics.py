@@ -52,14 +52,14 @@ def getNumUniqueCells(cells):
 class Metric_mIoU():
     def __init__(self,
                  save_dir='.',
-                 num_classes=18,
+                 num_classes=17,
                  use_lidar_mask=False,
                  use_image_mask=False,
                  ):
         self.class_names = ['others','barrier', 'bicycle', 'bus', 'car', 'construction_vehicle',
                             'motorcycle', 'pedestrian', 'traffic_cone', 'trailer', 'truck',
-                            'driveable_surface', 'other_flat', 'sidewalk',
-                            'terrain', 'manmade', 'vegetation','free']
+                            'animal', 'traffic_sign', 'other_vehicle',
+                            'train', 'background', 'free']
         self.save_dir = save_dir
         self.use_lidar_mask = use_lidar_mask
         self.use_image_mask = use_image_mask
@@ -145,6 +145,16 @@ class Metric_mIoU():
         # print(f'===> sample-wise averaged mIoU of {cnt} samples: ' + str(round(np.nanmean(mIoU_avg), 2)))
 
         # return mIoU
+
+        # Added
+        # Create a dictionary of per-class IoU
+        per_class_iou = {
+            self.class_names[i]: mIoU[i] for i in range(self.num_classes - 1)
+        }
+        # Calculate the final mean IoU
+        mean_iou = np.nanmean(mIoU[:self.num_classes - 1])
+
+        return mean_iou, per_class_iou
 
 
 class Metric_FScore():
