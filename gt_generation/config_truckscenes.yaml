@@ -24,7 +24,7 @@ cameras: ['CAMERA_LEFT_FRONT', 'CAMERA_RIGHT_FRONT', 'CAMERA_LEFT_BACK', 'CAMERA
 'camera_ray_depth_max': 100
 
 # Definition of max time difference to create a sample
-max_time_diff: 90000
+max_time_diff: 100000 #90000
 
 ###################################### Script 1 #####################################
 # Scenes with manual annotations
@@ -79,8 +79,8 @@ ror_radius_far: 0.5
 moving_object_velocity_threshold_ms: 0.2
 
 # MapMOS weight path
-weights_path_mapmos: "/code/ckpts/mapmos.ckpt"
-eights_path_mapmos: "/home/max/Desktop/Masterarbeit/Python/3D_Semantic_Occupancy_TruckScenes/gt_generation/ckpts/mapmos.ckpt"
+#weights_path_mapmos: "/code/ckpts/mapmos.ckpt"
+weights_path_mapmos: "/home/max/Desktop/Masterarbeit/Python/3D_Semantic_Occupancy_TruckScenes/gt_generation/ckpts/mapmos.ckpt"
 
 # Kiss-ICP
 kiss_icp_config_path: "kiss_config.yaml"

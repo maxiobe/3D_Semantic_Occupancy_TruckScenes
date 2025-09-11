@@ -214,6 +214,7 @@ gt_generation/results
 
 gt_generation/pipeline_io
 gt_generation/ckpts
+gt_generation/manual_annotation
 
 prediction/BEVFormer/work_dirs
 prediction/BEVFormer/data_info

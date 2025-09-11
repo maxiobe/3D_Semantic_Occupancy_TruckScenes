@@ -57,7 +57,7 @@ RUN conda clean --all --yes && \
 # CRITICAL FIX: Force the system's dynamic linker to prioritize the Conda C++ library.
 # This solves the `CXXABI_1.3.15 not found` runtime error.
 ENV LD_LIBRARY_PATH=/opt/conda/envs/occ_kiss_p3d/lib:$LD_LIBRARY_PATH
-ENV TORCH_CUDA_ARCH_LIST="7.5 8.0 8.6+PTX"
+ENV TORCH_CUDA_ARCH_LIST="6.0 7.0 7.5 8.0 8.6+PTX"
 ENV CUDA_HOME=/usr/local/cuda
 ENV FORCE_CUDA=1
 
@@ -67,7 +67,7 @@ RUN conda run -n occ_kiss_p3d pip install torch==2.1.0 torchvision==0.16.0 torch
 # 3. Build PyTorch3D from source.
 RUN conda run -n occ_kiss_p3d sh -c '\
     pip install fvcore iopath && \
-    TORCH_CUDA_ARCH_LIST="7.5 8.0 8.6+PTX" pip install "git+https://github.com/facebookresearch/pytorch3d.git@stable" \
+    TORCH_CUDA_ARCH_LIST="6.0 7.0 7.5 8.0 8.6+PTX" pip install "git+https://github.com/facebookresearch/pytorch3d.git@stable" \
     '
 
 # 4. Install other pip dependencies.

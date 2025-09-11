@@ -14,14 +14,16 @@ CONFIG_PATH="config_truckscenes.yaml"
 LABEL_MAPPING="truckscenes.yaml"
 SAVE_PATH_GT="/home/max/ssd/Masterarbeit/TruckScenes/trainval/v1.0-trainval/gts_64"
 #SAVE_PATH_GT="/home/max/ssd/Masterarbeit/TruckScenes/mini/v1.0-mini/gts_low_64"
+# SAVE_PATH_GT="/dss/dssfs02/lwp-dss-0001/t7441/t7441-dss-0000/ge84von2/mini/gts"
 DATA_ROOT="/home/max/ssd/Masterarbeit/TruckScenes/trainval/v1.0-trainval"
 #DATA_ROOT="/home/max/ssd/Masterarbeit/TruckScenes/mini/v1.0-mini"
+#DATA_ROOT = "/dss/dssfs04/pn69za/pn69za-dss-0004/datasets/man-truckscenes"
 VERSION="v1.0-trainval"
 #VERSION="v1.0-mini"
 #SPLIT="train"
 SPLIT="all"
-START=543
-END=597
+START=364
+END=365
 LOAD_MODE="pointwise"
 
 USE_FLEXCLOUD=0
@@ -30,6 +32,7 @@ USE_FLEXCLOUD=0
 USE_LOCAL_STATIC_MAP=0
 # Define the root directory for your Python scripts
 PIPELINE_DIR="/home/max/Desktop/Masterarbeit/Python/3D_Semantic_Occupancy_TruckScenes/gt_generation"
+# PIPELINE_DIR="/dss/dssfs02/lwp-dss-0001/t7441/t7441-dss-0000/ge84von2/3D_Semantic_Occupancy_TruckScenes/gt_generation"
 
 # Define a single base directory for all temporary I/O
 IO_BASE_DIR="${PIPELINE_DIR}/pipeline_io"
@@ -69,11 +72,11 @@ do
         --filter_mode both \
         --filter_static_pc \
         --initial_guess_mode ego_pose \
-        --run_mapmos \
         --static_map_keyframes_only \
         --use_flexcloud "$USE_FLEXCLOUD" \
         --filter_lidar_intensity \
         --icp_refinement \
+        --run_mapmos \
         #--vis_static_frame_comparison_kiss_refined \
         #--pose_error_plot \
         #--vis_aggregated_static_ego_ref_pc \
