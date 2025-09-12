@@ -119,12 +119,12 @@ class HungarianMatcher(BaseModule):
 
         indices = []
 
-        print("class pred:")
-        print(class_pred)
-        print("mask gt:")
-        print(mask_gt)
-        print("class_gt:")
-        print(class_gt)
+        #print("class pred:")
+        #print(class_pred)
+        #print("mask gt:")
+        #print(mask_gt)
+        #print("class_gt:")
+        #print(class_gt)
 
         # Iterate through batch size
         for b in range(bs):
