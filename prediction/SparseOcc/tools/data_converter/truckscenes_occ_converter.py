@@ -319,11 +319,11 @@ def create_truckscenes_occ_infos(root_path,
         print(f"Saved test info to {info_path_test}")
     else:
         train_data = dict(infos=train_infos, metadata=metadata)
-        info_path_train = osp.join(out_dir, f'{info_prefix}_infos_train.pkl')
+        info_path_train = osp.join(out_dir, f'{info_prefix}_infos_train_sweep.pkl')
         mmcv.dump(train_data, info_path_train)
         print(f"Saved training info to {info_path_train}")
 
         val_data = dict(infos=val_infos, metadata=metadata)
-        info_path_val = osp.join(out_dir, f'{info_prefix}_infos_val.pkl')
+        info_path_val = osp.join(out_dir, f'{info_prefix}_infos_val_sweep.pkl')
         mmcv.dump(val_data, info_path_val)
         print(f"Saved validation info to {info_path_val}")
