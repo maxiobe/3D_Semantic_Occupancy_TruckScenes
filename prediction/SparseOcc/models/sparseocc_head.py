@@ -9,9 +9,14 @@ from .matcher import HungarianMatcher
 from .loss_utils import CE_ssc_loss, lovasz_softmax, get_voxel_decoder_loss_input
 
 
-NUSC_CLASS_FREQ = np.array([
+"""NUSC_CLASS_FREQ = np.array([
     944004, 1897170, 152386, 2391677, 16957802, 724139, 189027, 2074468, 413451, 2384460,
     5916653, 175883646, 4275424, 51393615, 61411620, 105975596, 116424404, 1892500630
+])"""
+
+TRSC_CLASS_FREQ = np.array([
+    2074, 1773, 1649, 2639, 182634, 1695, 1390, 12813, 34261, 79555, 113309, 896, 182634,
+    3168, 2005, 300000, 500000
 ])
 
 
@@ -40,7 +45,7 @@ class SparseOccHead(nn.Module):
         self.criterions = {k: build_loss(loss_cfg) for k, loss_cfg in loss_cfgs.items()}
         self.matcher = HungarianMatcher(cost_class=2.0, cost_mask=5.0, cost_dice=5.0)
 
-        self.class_weights = torch.from_numpy(1 / np.log(NUSC_CLASS_FREQ + 0.001))
+        self.class_weights = torch.from_numpy(1 / np.log(TRSC_CLASS_FREQ + 0.001))
 
     def init_weights(self):
         self.transformer.init_weights()
