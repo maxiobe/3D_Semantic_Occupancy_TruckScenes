@@ -14,6 +14,8 @@ def get_voxel_decoder_loss_input(voxel_semantics, occ_loc_i, seg_pred_i, scale, 
 
     if seg_pred_i is not None:  # semantic prediction
         assert seg_pred_i.shape[-1] == num_classes
+
+        print(scale)
         
         seg_pred_dense, sparse_mask = sparse2dense(
             occ_loc_i, seg_pred_i,
