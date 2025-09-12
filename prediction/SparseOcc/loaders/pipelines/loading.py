@@ -47,7 +47,8 @@ class LoadMultiViewImageFromMultiSweeps(object):
         self.test_mode = test_mode
 
         self.train_interval = [4, 8]
-        self.test_interval = 6
+        #self.test_interval = 6
+        self.test_interval = 4
 
         try:
             mmcv.use_backend('turbojpeg')
