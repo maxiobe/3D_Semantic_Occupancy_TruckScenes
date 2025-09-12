@@ -23,7 +23,9 @@ def get_voxel_decoder_loss_input(voxel_semantics, occ_loc_i, seg_pred_i, scale, 
             dense_shape=[750 // scale, 750 // scale, 64 // scale, num_classes],
             empty_value=torch.zeros((num_classes)).to(seg_pred_i)
         )
-        sparse_mask = F.interpolate(sparse_mask[:, None].float(), scale_factor=scale)[:, 0].bool()
+        target_shape = voxel_semantics.shape[1:] # New
+        sparse_mask = F.interpolate(sparse_mask[:, None].float(), size=target_shape, mode='nearest')[:, 0].bool()
+        # sparse_mask = F.interpolate(sparse_mask[:, None].float(), scale_factor=scale)[:, 0].bool()
         seg_pred_dense = seg_pred_dense.permute(0, 4, 1, 2, 3)   # [B, CLS, W, H, D]
         seg_pred_dense = F.interpolate(seg_pred_dense, scale_factor=scale)
         seg_pred_dense = seg_pred_dense.permute(0, 2, 3, 4, 1)   # [B, W, H, D, CLS]
