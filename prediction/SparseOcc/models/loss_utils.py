@@ -8,7 +8,7 @@ from torch.cuda.amp import autocast
 from torch.autograd import Variable
 
 
-def get_voxel_decoder_loss_input(voxel_semantics, occ_loc_i, seg_pred_i, scale, num_classes=18):
+def get_voxel_decoder_loss_input(voxel_semantics, occ_loc_i, seg_pred_i, scale, num_classes=17):
     assert voxel_semantics.shape[0] == 1  # bs = 1
     voxel_semantics = voxel_semantics.long()
 
@@ -17,7 +17,8 @@ def get_voxel_decoder_loss_input(voxel_semantics, occ_loc_i, seg_pred_i, scale, 
         
         seg_pred_dense, sparse_mask = sparse2dense(
             occ_loc_i, seg_pred_i,
-            dense_shape=[200 // scale, 200 // scale, 16 // scale, num_classes],
+            #dense_shape=[200 // scale, 200 // scale, 16 // scale, num_classes],
+            dense_shape=[750 // scale, 750 // scale, 64 // scale, num_classes],
             empty_value=torch.zeros((num_classes)).to(seg_pred_i)
         )
         sparse_mask = F.interpolate(sparse_mask[:, None].float(), scale_factor=scale)[:, 0].bool()
