@@ -82,7 +82,7 @@ def make_sample_points_from_mask(valid_map, pc_range, occ_size, num_points, occ_
 
 def sampling_4d(sample_points, mlvl_feats, scale_weights, lidar2img, image_h, image_w, eps=1e-5):
     B, Q, T, G, P, _ = sample_points.shape  # [B, Q, T, G, P, 4]
-    N = 6
+    N = 4
 
     sample_points = sample_points.reshape(B, Q, T, G * P, 3)
     
