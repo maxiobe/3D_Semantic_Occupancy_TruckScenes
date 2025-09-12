@@ -132,6 +132,16 @@ class HungarianMatcher(BaseModule):
             tgt_ids = class_gt[b]
             num_instances = tgt_ids.shape[0]  # must be here, cause num of instances may change after masking
 
+            # Newly added
+            if num_instances == 0:
+                # If not, there's nothing to match. Append empty indices
+                # and skip to the next sample in the batch.
+                indices.append((
+                    torch.tensor([], device=class_pred.device, dtype=torch.long),
+                    torch.tensor([], device=class_pred.device, dtype=torch.long)
+                ))
+                continue
+
             # Compute the classification cost. Contrary to the loss, we don't use the NLL,
             # but approximate it in 1 - proba[target class].
             # The 1 is a constant that doesn't change the matching, it can be ommitted.
