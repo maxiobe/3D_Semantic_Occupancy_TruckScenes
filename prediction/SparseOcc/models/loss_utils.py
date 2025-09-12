@@ -383,6 +383,9 @@ class Mask2FormerLoss(nn.Module):
         """Compute the losses related to the masks: the focal loss and the dice loss.
         targets dicts must contain the key "masks" containing a tensor of dim [nb_target_boxes, h, w]
         """
+        # Added to fix empty
+        if src_mask.shape[0] == 0:
+            return src_mask.sum() * 0, src_mask.sum() * 0
         # No need to upsample predictions as we are using normalized coordinates :)
         # N x 1 x H x W
         num_masks = tgt_mask.shape[0]
