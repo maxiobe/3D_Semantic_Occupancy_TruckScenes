@@ -38,6 +38,9 @@ def get_voxel_decoder_loss_input(voxel_semantics, occ_loc_i, seg_pred_i, scale, 
 
 
 def compute_scal_loss(pred, gt, class_id, reverse=False, ignore_index=255):
+    # Add a small epsilon for numerical stability
+    epsilon = 1e-6
+
     p = pred[:, class_id, :]
     completion_target = (gt == class_id).long()
     
@@ -57,7 +60,7 @@ def compute_scal_loss(pred, gt, class_id, reverse=False, ignore_index=255):
     
     p_mask = torch.where(torch.sum(p, dim=(1)) > 0)
     if p_mask[0].shape[0] > 0:
-        precision = nominator[p_mask] / torch.sum(p[p_mask], dim=(1))
+        precision = nominator[p_mask] / (torch.sum(p[p_mask], dim=(1)) + epsilon)
         loss_precision = F.binary_cross_entropy(
             precision, torch.ones_like(precision),
             reduction='none'
@@ -66,7 +69,7 @@ def compute_scal_loss(pred, gt, class_id, reverse=False, ignore_index=255):
         
     t_mask = torch.where(torch.sum(completion_target, dim=(1)) > 0)
     if t_mask[0].shape[0] > 0:
-        recall = nominator[t_mask] / torch.sum(completion_target[t_mask], dim=(1))
+        recall = nominator[t_mask] / (torch.sum(completion_target[t_mask], dim=(1)) + epsilon)
         loss_recall = F.binary_cross_entropy(
             recall, torch.ones_like(recall),
             reduction='none'
@@ -76,7 +79,7 @@ def compute_scal_loss(pred, gt, class_id, reverse=False, ignore_index=255):
     ct_mask = torch.where(torch.sum(1 - completion_target, dim=(1)) > 0)
     if ct_mask[0].shape[0] > 0:
         specificity = torch.sum((1 - p[ct_mask]) * (1 - completion_target[ct_mask]), dim=(1)) / (
-            torch.sum(1 - completion_target[ct_mask], dim=(1))
+            torch.sum(1 - completion_target[ct_mask], dim=(1)) + epsilon
         )
         loss_ct = F.binary_cross_entropy(
             specificity, torch.ones_like(specificity),
@@ -129,7 +132,7 @@ class SemScalLoss(nn.Module):
             count += mask_cls.long()
             loss += loss_cls * self.class_weights[i]
         
-        return self.loss_weight * (loss / count).mean()
+        return self.loss_weight * (loss / (count + 1e-6)).mean()
 
 
 # borrowed from https://github.com/facebookresearch/Mask2Former/blob/main/mask2former/modeling/criterion.py#L21
