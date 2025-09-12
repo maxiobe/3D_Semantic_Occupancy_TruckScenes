@@ -55,10 +55,11 @@ class LoadMultiViewImageFromMultiSweeps(object):
             mmcv.use_backend('cv2')
 
     def load_offline(self, results):
-        cam_types = [
+        """cam_types = [
             'CAM_FRONT', 'CAM_FRONT_RIGHT', 'CAM_FRONT_LEFT',
             'CAM_BACK', 'CAM_BACK_LEFT', 'CAM_BACK_RIGHT'
-        ]
+        ]"""
+        cam_types = ['CAMERA_LEFT_FRONT', 'CAMERA_RIGHT_FRONT', 'CAMERA_LEFT_BACK', 'CAMERA_RIGHT_BACK']
 
         if len(results['sweeps']['prev']) == 0:
             for _ in range(self.sweeps_num):
