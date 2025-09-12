@@ -119,6 +119,13 @@ class HungarianMatcher(BaseModule):
 
         indices = []
 
+        print("class pred:")
+        print(class_pred)
+        print("mask gt:")
+        print(mask_gt)
+        print("class_gt:")
+        print(class_gt)
+
         # Iterate through batch size
         for b in range(bs):
             mask_camera_b = mask_camera[b] if mask_camera is not None else None
