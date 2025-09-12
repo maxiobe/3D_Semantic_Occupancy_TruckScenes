@@ -27,7 +27,8 @@ def get_voxel_decoder_loss_input(voxel_semantics, occ_loc_i, seg_pred_i, scale, 
         sparse_mask = F.interpolate(sparse_mask[:, None].float(), size=target_shape, mode='nearest')[:, 0].bool()
         # sparse_mask = F.interpolate(sparse_mask[:, None].float(), scale_factor=scale)[:, 0].bool()
         seg_pred_dense = seg_pred_dense.permute(0, 4, 1, 2, 3)   # [B, CLS, W, H, D]
-        seg_pred_dense = F.interpolate(seg_pred_dense, scale_factor=scale)
+        #seg_pred_dense = F.interpolate(seg_pred_dense, scale_factor=scale)
+        seg_pred_dense = F.interpolate(seg_pred_dense, size=target_shape, mode='trilinear', align_corners=False)
         seg_pred_dense = seg_pred_dense.permute(0, 2, 3, 4, 1)   # [B, W, H, D, CLS]
 
         seg_pred_i_sparse = seg_pred_dense[sparse_mask]  # [K, CLS]
