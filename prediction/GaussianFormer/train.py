@@ -340,6 +340,12 @@ def main(local_rank, args):
             writer.add_scalar('Eval/mIoU', miou, epoch)
             writer.add_scalar('Eval/iou2', iou2, epoch)
 
+            if hasattr(miou_metric, 'iou') and hasattr(miou_metric, 'label_str'):
+                for i, iou_class in enumerate(miou_metric.iou):
+                    # Use 'label_str' as defined in the MeanIoU class
+                    class_name = miou_metric.label_str[i]
+                    writer.add_scalar(f'IoU/{class_name}', iou_class * 100, epoch)
+
         miou_metric.reset()
     
     if writer is not None:

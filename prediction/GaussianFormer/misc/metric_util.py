@@ -93,6 +93,8 @@ class MeanIoU:
                 ious.append(cur_iou.item())
                 recas.append(cur_reca)
 
+        self.iou = ious
+
         miou = np.mean(ious)
         # logger = get_root_logger()
         logger.info(f'Validation per class iou {self.name}:')
