@@ -17,6 +17,26 @@ import mmdet3d
 from projects.mmdet3d_plugin.models.utils.bricks import run_time
 
 
+def check_metas_for_nan(metas):
+    """
+    Iterates through the img_metas list of dicts to check for NaNs
+    in any numpy arrays.
+    """
+    # 'metas' is a list of dicts
+    for i, meta_dict in enumerate(metas):
+        for key, value in meta_dict.items():
+            # Check top-level numpy arrays (like can_bus)
+            if isinstance(value, np.ndarray):
+                if np.isnan(value).any():
+                    # This will print a specific warning if a NaN is found
+                    print(f"🚨 WARNING: NaN found in img_metas! Sample index: {i}, Key: '{key}'")
+
+            # Check for lists of numpy arrays (like lidar2img)
+            elif isinstance(value, list) and len(value) > 0 and isinstance(value[0], np.ndarray):
+                for j, arr in enumerate(value):
+                    if np.isnan(arr).any():
+                        print(f"🚨 WARNING: NaN found in img_metas! Sample index: {i}, Key: '{key}', List index: {j}")
+
 @DETECTORS.register_module()
 class BEVFormerOcc(MVXTwoStageDetector):
     """BEVFormer.
@@ -132,6 +152,29 @@ class BEVFormerOcc(MVXTwoStageDetector):
 
         outs = self.pts_bbox_head(
             pts_feats, img_metas, prev_bev)
+
+        """occ_tensor = outs['occ']
+        print(occ_tensor.shape)
+        predicted_class_ids = torch.argmax(occ_tensor, dim=-1)
+        unique_ids, counts = torch.unique(predicted_class_ids, return_counts=True)
+
+        class_names = {
+            0: 'noise', 1: 'barrier', 2: 'bicycle', 3: 'bus',
+            4: 'car', 5: 'construction_vehicle', 6: 'motorcycle', 7: 'pedestrian',
+            8: 'traffic_cone', 9: 'trailer', 10: 'truck', 11: 'animal',
+            12: 'traffic_sign', 13: 'other_vehicle', 14: 'train', 15: 'background', 16: 'free'
+        }
+
+        print("\n--- Predicted Voxel Counts per Class ---")
+        # Sort the results by count in descending order for clarity
+        sorted_indices = torch.argsort(counts, descending=True)
+        for i in sorted_indices:
+            class_id = unique_ids[i].item()
+            count = counts[i].item()
+            class_name = class_names.get(class_id, f"Unknown_Class_{class_id}")
+            print(f"    {class_name}: {count:,} voxels")
+        print("----------------------------------------\n")"""
+
         loss_inputs = [voxel_semantics, mask_camera, outs]
         losses = self.pts_bbox_head.loss(*loss_inputs, img_metas=img_metas)
         return losses
@@ -216,6 +259,17 @@ class BEVFormerOcc(MVXTwoStageDetector):
         Returns:
             dict: Losses of different branches.
         """
+        """if img is not None:
+            if torch.isnan(img).any():
+                # This will crash the program with a clear error if NaN is found.
+                raise ValueError("FATAL: NaN values detected in the input 'img' tensor during training!")
+            if torch.isinf(img).any():
+                # This checks for infinity, which is also a problem.
+                raise ValueError("FATAL: Inf values detected in the input 'img' tensor during training!")
+
+        if img_metas is not None:
+            check_metas_for_nan(img_metas)"""
+
 
         len_queue = img.size(1)
         prev_img = img[:, :-1, ...]
@@ -281,6 +335,9 @@ class BEVFormerOcc(MVXTwoStageDetector):
         """Test function"""
         outs = self.pts_bbox_head(x, img_metas, prev_bev=prev_bev, test=True)
 
+        #print("Outs")
+        #print(outs)
+
         occ = self.pts_bbox_head.get_occ(
             outs, img_metas, rescale=rescale)
 
@@ -290,9 +347,36 @@ class BEVFormerOcc(MVXTwoStageDetector):
         """Test function without augmentaiton."""
         img_feats = self.extract_feat(img=img, img_metas=img_metas)
 
+        #print("Img features")
+        #print(img_feats)
+        #print("Img metas")
+        #print(img_metas)
+        #print("Prev bev")
+        #print(prev_bev)
+
         # bbox_list = [dict() for i in range(len(img_metas))]
         new_prev_bev, occ = self.simple_test_pts(
             img_feats, img_metas, prev_bev, rescale=rescale)
         # for result_dict, pts_bbox in zip(bbox_list, bbox_pts):
         #     result_dict['pts_bbox'] = pts_bbox
+
+        """print(f"\nOcc shape: {occ.shape}")
+        unique_ids, counts = torch.unique(occ, return_counts=True)
+
+        class_names = {
+            0: 'noise', 1: 'barrier', 2: 'bicycle', 3: 'bus',
+            4: 'car', 5: 'construction_vehicle', 6: 'motorcycle', 7: 'pedestrian',
+            8: 'traffic_cone', 9: 'trailer', 10: 'truck', 11: 'animal',
+            12: 'traffic_sign', 13: 'other_vehicle', 14: 'train', 15: 'background', 16: 'free'
+        }
+
+        print("\n--- Predicted Voxel Counts per Class (Testing) ---")
+        sorted_indices = torch.argsort(counts, descending=True)
+        for i in sorted_indices:
+            class_id = unique_ids[i].item()
+            count = counts[i].item()
+            class_name = class_names.get(class_id, f"Unknown_Class_{class_id}")
+            print(f"    {class_name}: {count:,} voxels")
+        print("------------------------------------------------\n")"""
+
         return new_prev_bev, occ

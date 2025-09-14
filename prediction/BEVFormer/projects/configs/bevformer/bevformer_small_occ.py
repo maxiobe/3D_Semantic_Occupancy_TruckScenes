@@ -149,7 +149,7 @@ model = dict(
         ),
     # model training and testing settings
     train_cfg=dict(pts=dict(
-        grid_size=[512, 512, 1],
+        grid_size=[512, 512, 1], #[512, 512, 1],
         voxel_size=voxel_size,
         point_cloud_range=point_cloud_range,
         out_size_factor=4,
@@ -236,29 +236,34 @@ data = dict(
 )
 optimizer = dict(
     type='AdamW',
-    lr=2e-4, # 2e-4
+    lr=5e-5, # 2e-4
     paramwise_cfg=dict(
         custom_keys={
             'img_backbone': dict(lr_mult=0.1),
         }),
     weight_decay=0.01)
 
-optimizer_config = dict(grad_clip=dict(max_norm=35, norm_type=2))
+optimizer_config = dict(grad_clip=dict(max_norm=25, norm_type=2)) # max_norm=35
 # learning policy
 lr_config = dict(
     policy='CosineAnnealing',
     warmup='linear',
-    warmup_iters=500,
-    warmup_ratio=1.0 / 3,
+    warmup_iters=1000, # 500
+    warmup_ratio=1.0 / 10, #1.0 / 3.0
     min_lr_ratio=1e-3)
 total_epochs = 24
-evaluation = dict(interval=1, pipeline=test_pipeline)
+evaluation = dict(
+    interval=1,
+    pipeline=test_pipeline,
+    save_best='mIoU', # added
+    rule='greater' # added
+)
 
 runner = dict(type='EpochBasedRunner', max_epochs=total_epochs)
 # load_from = 'ckpts/r101_dcn_fcos3d_pretrain.pth'
 load_from = '/code/prediction/BEVFormer/ckpts/r101_dcn_fcos3d_pretrain.pth'
 log_config = dict(
-    interval=50,
+    interval=20, #50
     hooks=[
         dict(type='TextLoggerHook'),
         dict(type='TensorboardLoggerHook')

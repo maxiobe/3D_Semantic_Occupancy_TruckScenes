@@ -196,7 +196,7 @@ class BEVFormerEncoder(TransformerLayerSequence):
             ref_3d, self.pc_range, kwargs['img_metas'])
 
         # bug: this code should be 'shift_ref_2d = ref_2d.clone()', we keep this bug for reproducing our results in paper.
-        shift_ref_2d = ref_2d  # .clone()
+        shift_ref_2d = ref_2d.clone()  # .clone()
         shift_ref_2d += shift[:, None, None, :]
 
         # (num_query, bs, embed_dims) -> (bs, num_query, embed_dims)
@@ -230,13 +230,17 @@ class BEVFormerEncoder(TransformerLayerSequence):
                 bev_mask=bev_mask,
                 prev_bev=prev_bev,
                 **kwargs)
-
+            #print("Output layer")
+            #print(output)
             bev_query = output
             if self.return_intermediate:
                 intermediate.append(output)
 
         if self.return_intermediate:
             return torch.stack(intermediate)
+
+        #print("Final output layer")
+        #print(output)
 
         return output
 

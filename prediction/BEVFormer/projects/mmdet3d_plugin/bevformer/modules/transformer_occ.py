@@ -50,7 +50,7 @@ class TransformerOcc(BaseModule):
                  use_3d=False,
                  use_conv=False,
                  rotate_center=[100, 100],
-                 num_classes=18,
+                 num_classes=17,
                  out_dim=32,
                  pillar_h=16,
                  act_cfg=dict(type='ReLU',inplace=True),
@@ -129,6 +129,28 @@ class TransformerOcc(BaseModule):
                     norm_cfg=norm_cfg_3d,
                     act_cfg=act_cfg),
             )
+
+            """self.decoder_conv1 = ConvModule(
+                self.middle_dims,
+                self.out_dim,
+                kernel_size=3,
+                stride=1,
+                padding=1,
+                bias=use_bias_3d,
+                conv_cfg=dict(type='Conv3d'),
+                norm_cfg=norm_cfg_3d,
+                act_cfg=act_cfg)
+            self.decoder_conv2 = ConvModule(
+                self.out_dim,
+                self.out_dim,
+                kernel_size=3,
+                stride=1,
+                padding=1,
+                bias=use_bias_3d,
+                conv_cfg=dict(type='Conv3d'),
+                norm_cfg=norm_cfg_3d,
+                act_cfg=act_cfg)"""
+
         self.predicter = nn.Sequential(
             nn.Linear(self.out_dim, self.out_dim*2),
             nn.Softplus(),
@@ -196,8 +218,15 @@ class TransformerOcc(BaseModule):
                            for each in kwargs['img_metas']])
         delta_y = np.array([each['can_bus'][1]
                            for each in kwargs['img_metas']])
+
+        #print(f"X_delta: {delta_x}")
+        #print(f"Y_delta: {delta_y}")
+
         ego_angle = np.array(
             [each['can_bus'][-2] / np.pi * 180 for each in kwargs['img_metas']])
+
+        #print(f"ego_angle: {ego_angle}")
+
         grid_length_y = grid_length[0]
         grid_length_x = grid_length[1]
         translation_length = np.sqrt(delta_x ** 2 + delta_y ** 2)
@@ -234,6 +263,9 @@ class TransformerOcc(BaseModule):
         can_bus = bev_queries.new_tensor(
             [each['can_bus'] for each in kwargs['img_metas']])  # [:, :]
         can_bus = self.can_bus_mlp(can_bus)[None, :, :]
+
+        #print(f"can_bus: {self.use_can_bus}")
+        # self.use_can_bus = False
         bev_queries = bev_queries + can_bus * self.use_can_bus
 
         feat_flatten = []
@@ -340,6 +372,16 @@ class TransformerOcc(BaseModule):
             outputs=self.decoder(bev_embed.view(bs,-1,self.pillar_h,bev_h, bev_w))
             outputs=outputs.permute(0,4,3,2,1)
 
+            """x = bev_embed.view(bs, -1, self.pillar_h, bev_h, bev_w)
+            print("x before decoder")
+            print(x)
+            x = self.decoder_conv1(x)
+            print("x after decoder 1")
+            print(x)
+            x = self.decoder_conv2(x)
+            print("x after decoder 2")
+            print(x)"""
+
         elif self.use_conv:
 
             outputs = self.decoder(bev_embed)
@@ -347,6 +389,11 @@ class TransformerOcc(BaseModule):
         else:
             outputs = self.decoder(bev_embed.permute(0,2,3,1))
             outputs = outputs.view(bs, bev_h, bev_w,self.pillar_h,self.out_dim)
+
+        #print("Outputs before predicter")
+        #print(outputs)
         outputs = self.predicter(outputs)
         # print('outputs',type(outputs))
+        #print("Outputs after predicter")
+        #print(outputs)
         return bev_embed, outputs

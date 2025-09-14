@@ -65,9 +65,12 @@ class Metric_mIoU():
         self.use_image_mask = use_image_mask
         self.num_classes = num_classes
 
-        self.point_cloud_range = [-40.0, -40.0, -1.0, 40.0, 40.0, 5.4]
-        self.occupancy_size = [0.4, 0.4, 0.4]
-        self.voxel_size = 0.4
+        #self.point_cloud_range = [-40.0, -40.0, -1.0, 40.0, 40.0, 5.4]
+        self.point_cloud_range = [-75, -75, -2.0, 75, 75, 10.8]
+        #self.occupancy_size = [0.4, 0.4, 0.4]
+        self.occupancy_size = [0.2, 0.2, 0.2]
+        #self.voxel_size = 0.4
+        self.voxel_size = 0.2
         self.occ_xdim = int((self.point_cloud_range[3] - self.point_cloud_range[0]) / self.occupancy_size[0])
         self.occ_ydim = int((self.point_cloud_range[4] - self.point_cloud_range[1]) / self.occupancy_size[1])
         self.occ_zdim = int((self.point_cloud_range[5] - self.point_cloud_range[2]) / self.occupancy_size[2])
