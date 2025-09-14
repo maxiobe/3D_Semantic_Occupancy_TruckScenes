@@ -23,7 +23,7 @@ train_pipeline = [
     dict(type="PhotoMetricDistortionMultiViewImage"),
     dict(type="NormalizeMultiviewImage", **img_norm_cfg),
     dict(type="DefaultFormatBundle"),
-    dict(type="NuScenesAdaptor", use_ego=False, num_cams=6),
+    dict(type="NuScenesAdaptor", use_ego=False, num_cams=4),
 ]
 
 test_pipeline = [
@@ -32,7 +32,7 @@ test_pipeline = [
     dict(type="ResizeCropFlipImage"),
     dict(type="NormalizeMultiviewImage", **img_norm_cfg),
     dict(type="DefaultFormatBundle"),
-    dict(type="NuScenesAdaptor", use_ego=False, num_cams=6),
+    dict(type="NuScenesAdaptor", use_ego=False, num_cams=4),
 ]
 
 data_aug_conf = {
