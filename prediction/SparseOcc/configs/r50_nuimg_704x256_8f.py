@@ -207,7 +207,7 @@ optimizer = dict(
         }),
     weight_decay=0.01
 )
-optimizer_config = dict(grad_clip=dict(max_norm=35, norm_type=2))
+optimizer_config = dict(grad_clip=dict(max_norm=25, norm_type=2)) #max_norm=35
 
 lr_config = dict(
     policy='CosineAnnealing', #'step'
@@ -239,12 +239,15 @@ log_config = dict(
     interval=1,
     hooks=[
         dict(type='MyTextLoggerHook', interval=1, reset_flag=True),
-        dict(type='MyTensorboardLoggerHook', interval=500, reset_flag=True)
+        dict(type='MyTensorboardLoggerHook', interval=50, reset_flag=True) #interval=500
     ]
 )
 
 # evaluation
-eval_config = dict(interval=total_epochs)
+# eval_config = dict(interval=total_epochs)
+eval_config = dict(
+    interval=1
+)
 
 # other flags
 debug = False

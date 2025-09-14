@@ -136,7 +136,9 @@ class NuSceneOcc(NuScenesDataset):
             sem_pred = torch.from_numpy(occ_pred['sem_pred'])  # [B, N]
             occ_loc = torch.from_numpy(occ_pred['occ_loc'].astype(np.int64))  # [B, N, 3]
             
-            data_type = self.occ_gt_root.split('/')[-1]
+            #data_type = self.occ_gt_root.split('/')[-1]
+            data_type = 'occ3d' # Manual fix
+
             if data_type == 'occ3d' or data_type == 'occ3d_panoptic':
                 occ_class_names = occ3d_class_names
             elif data_type == 'openocc_v2':
