@@ -19,7 +19,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     python3.8-dev \
     python3.8-distutils \
     python3-pip \
-    libturbojpeg-dev &&\
+    libturbojpeg-dev \
+    libgl1-mesa-glx \
+    libglib2.0-0 \
+    ninja-build &&\
     # Clean up
     rm -rf /var/lib/apt/lists/*
 
@@ -52,7 +55,8 @@ RUN python3.8 -m pip install --no-cache-dir --upgrade pip && \
     python3.8 -m pip install --no-cache-dir \
         setuptools==59.5.0 \
         numpy==1.23.5 \
-        pyturbojpeg && \
+        pyturbojpeg \
+        wandb && \
     \
     # 5. Replace pillow with the faster pillow-simd
     python3.8 -m pip install --no-cache-dir --force-reinstall pillow-simd==9.0.0.post1 && \
