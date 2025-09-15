@@ -10,7 +10,7 @@ anno_root = "/code/prediction/GaussianFormer/data_info/trainval/"
 occ_path = "/gts/"
 
 input_shape = (704, 256)
-batch_size = 4
+batch_size = 3
 
 img_norm_cfg = dict(
     mean=[123.675, 116.28, 103.53], std=[58.395, 57.12, 57.375], to_rgb=True
@@ -65,11 +65,11 @@ val_dataset_config = dict(
 
 train_loader = dict(
     batch_size=batch_size,
-    num_workers=2,
+    num_workers=1,
     shuffle=True
 )
 
 val_loader = dict(
     batch_size=batch_size,
-    num_workers=2
+    num_workers=1
 )
