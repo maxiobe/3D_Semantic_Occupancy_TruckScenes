@@ -28,11 +28,21 @@ from .utils.lovasz_softmax import lovasz_softmax
     1892500630
 ])""" # nuscenes
 
+# based on bounding boxes
 nusc_class_frequencies = np.array([
     2074, 1773, 1649, 2639, 182634, 1695, 1390,
     12813, 34261, 79555, 113309, 896, 182634,
     3168, 2005, 300000, 500000
 ]) # background and free class default labels randomly selected
+
+
+# based on labels in occupancy grids
+"""nusc_class_frequencies = np.array([
+    820511, 271429, 292283, 5477952, 139564017, 
+    3554278, 275585, 1157896, 1121443, 173378212,
+    84734644, 36222, 31427066, 6857852, 53672547,
+    7437846035, 852531512028
+])"""
 
 
 @OPENOCC_LOSS.register_module()
