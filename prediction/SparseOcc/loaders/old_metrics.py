@@ -252,7 +252,7 @@ class Metric_FScore():
 class Metric_mRecall():
     def __init__(self,
                  save_dir='.',
-                 num_classes=18,
+                 num_classes=17,
                  pred_classes=2,
                  use_lidar_mask=False,
                  use_image_mask=False,
@@ -263,6 +263,13 @@ class Metric_mRecall():
                 'motorcycle', 'pedestrian', 'traffic_cone', 'trailer', 'truck',
                 'driveable_surface', 'other_flat', 'sidewalk',
                 'terrain', 'manmade', 'vegetation','free'
+            ]
+        elif num_classes == 17:
+            self.class_names = [
+                'noise', 'barrier', 'bicycle', 'bus', 'car', 'construction_vehicle',
+                'motorcycle', 'pedestrian', 'traffic_cone', 'trailer', 'truck',
+                'animal', 'traffic_sign', 'other_vehicle',
+                'train', 'background', 'free'
             ]
         elif num_classes == 2:
             self.class_names = ['non-free', 'free']
@@ -376,6 +383,13 @@ class Metric_Panoptic():
                 'motorcycle', 'pedestrian', 'traffic_cone', 'trailer', 'truck',
                 'driveable_surface', 'other_flat', 'sidewalk',
                 'terrain', 'manmade', 'vegetation','free'
+            ]
+        elif num_classes == 17:
+            self.class_names = [
+                'noise', 'barrier', 'bicycle', 'bus', 'car', 'construction_vehicle',
+                'motorcycle', 'pedestrian', 'traffic_cone', 'trailer', 'truck',
+                'animal', 'traffic_sign', 'other_vehicle',
+                'train', 'background', 'free'
             ]
         else:
             raise ValueError

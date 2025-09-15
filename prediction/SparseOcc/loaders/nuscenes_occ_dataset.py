@@ -11,6 +11,7 @@ from nuscenes.utils.geometry_utils import transform_matrix
 from torch.utils.data import DataLoader
 from models.utils import sparse2dense
 from .ray_metrics import main_rayiou, main_raypq
+from .old_metrics import Metric_mIoU
 from .ego_pose_dataset import EgoPoseDataset
 from configs.r50_nuimg_704x256_8f import occ_class_names as occ3d_class_names
 from configs.r50_nuimg_704x256_8f_openocc import occ_class_names as openocc_class_names
@@ -121,6 +122,21 @@ class NuSceneOcc(NuScenesDataset):
 
         sample_tokens = [info['token'] for info in self.data_infos]
 
+        # data_type = self.occ_gt_root.split('/')[-1]
+        data_type = 'occ3d'  # Manual fix
+
+        if data_type == 'occ3d' or data_type == 'occ3d_panoptic':
+            occ_class_names = occ3d_class_names
+        elif data_type == 'openocc_v2':
+            occ_class_names = openocc_class_names
+        else:
+            raise ValueError
+
+        num_classes = len(occ_class_names)
+        free_id = num_classes - 1
+
+        miou_calculator = Metric_mIoU(num_classes=num_classes)
+
         for batch in DataLoader(EgoPoseDataset(self.data_infos), num_workers=8):
             token = batch[0][0]
             output_origin = batch[1]
@@ -136,20 +152,16 @@ class NuSceneOcc(NuScenesDataset):
             sem_pred = torch.from_numpy(occ_pred['sem_pred'])  # [B, N]
             occ_loc = torch.from_numpy(occ_pred['occ_loc'].astype(np.int64))  # [B, N, 3]
             
-            #data_type = self.occ_gt_root.split('/')[-1]
-            data_type = 'occ3d' # Manual fix
-
-            if data_type == 'occ3d' or data_type == 'occ3d_panoptic':
-                occ_class_names = occ3d_class_names
-            elif data_type == 'openocc_v2':
-                occ_class_names = openocc_class_names
-            else:
-                raise ValueError
-            free_id = len(occ_class_names) - 1
-            
             occ_size = list(gt_semantics.shape)
             sem_pred, _ = sparse2dense(occ_loc, sem_pred, dense_shape=occ_size, empty_value=free_id)
             sem_pred = sem_pred.squeeze(0).numpy()
+
+            miou_calculator.add_batch(
+                semantics_pred=sem_pred,
+                semantics_gt=gt_semantics,
+                mask_lidar=None,  # Not needed if use_lidar_mask=False
+                mask_camera=None,  # Not needed if use_image_mask=False
+            )
 
             if 'pano_inst' in occ_pred.keys():
                 pano_inst = torch.from_numpy(occ_pred['pano_inst'])
@@ -168,13 +180,21 @@ class NuSceneOcc(NuScenesDataset):
             lidar_origins.append(output_origin)
             occ_gts.append(gt_semantics)
             occ_preds.append(sem_pred)
+
+        print('\n--- Voxel-based mIoU Results ---')
+        final_miou = miou_calculator.count_miou()
+
+        eval_results = {'mIoU': final_miou}
         
         if len(inst_preds) > 0:
             results = main_raypq(occ_preds, occ_gts, inst_preds, inst_gts, lidar_origins, occ_class_names=occ_class_names)
             results.update(main_rayiou(occ_preds, occ_gts, lidar_origins, occ_class_names=occ_class_names))
-            return results
+            eval_results.update(results)
+            return eval_results
         else:
-            return main_rayiou(occ_preds, occ_gts, lidar_origins, occ_class_names=occ_class_names)
+            ray_results = main_rayiou(occ_preds, occ_gts, lidar_origins, occ_class_names=occ_class_names)
+            eval_results.update(ray_results)
+            return eval_results
 
     def format_results(self, occ_results, submission_prefix, **kwargs):
         if submission_prefix is not None:
