@@ -240,7 +240,7 @@ class RandomTransformImage(object):
                 results['img'][i] = np.array(img).astype(np.uint8)
                 results['lidar2img'][i] = ida_mat @ results['lidar2img'][i]
 
-        elif len(results['img']) == 6:
+        elif len(results['img']) == 4:
             for i in range(len(results['img'])):
                 img = Image.fromarray(np.uint8(results['img'][i]))
                 
