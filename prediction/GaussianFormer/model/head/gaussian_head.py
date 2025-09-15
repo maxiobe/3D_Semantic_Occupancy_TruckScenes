@@ -196,11 +196,13 @@ class GaussianHead(BaseTaskHead):
                 else:
                     geosem = semantics[0]
                     
-                prediction.append(geosem[None].transpose(1, 2))
+                #prediction.append(geosem[None].transpose(1, 2))
+                prediction.append(geosem.transpose(1, 2))
                 bin_logits.append(semantics[1][None])
                 density.append(semantics[2][None])
             else:
-                prediction.append(semantics[None].transpose(1, 2))
+                #prediction.append(semantics[None].transpose(1, 2))
+                prediction.append(semantics.transpose(1, 2))
         
         if self.use_localaggprob and not self.combine_geosem:
             threshold = kwargs.get("sigmoid_thresh", 0.5)

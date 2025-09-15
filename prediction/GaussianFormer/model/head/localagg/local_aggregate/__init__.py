@@ -226,7 +226,7 @@ class LocalAggregator(nn.Module):
             output_logits.append(logits_i)
 
         # Stack the results from each sample back into a single batch tensor
-        final_logits = torch.cat(output_logits, dim=0)
+        final_logits = torch.stack(output_logits, dim=0)
         # --- End of new batch handling logic ---
 
         if not self.inv_softmax:
