@@ -1,4 +1,4 @@
-print_freq = 50
+print_freq = 10
 work_dir = None
 load_from = None
 max_epochs = 20
