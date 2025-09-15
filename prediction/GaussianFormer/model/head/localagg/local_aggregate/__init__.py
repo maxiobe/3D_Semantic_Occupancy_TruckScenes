@@ -105,7 +105,7 @@ class _LocalAggregate(torch.autograd.Function):
 
         return grads
 
-class LocalAggregator(nn.Module):
+"""class LocalAggregator(nn.Module):
     def __init__(self, scale_multiplier, H, W, D, pc_min, grid_size, inv_softmax=False):
         super().__init__()
         self.scale_multiplier = scale_multiplier
@@ -158,4 +158,78 @@ class LocalAggregator(nn.Module):
         if not self.inv_softmax:
             return logits # n, c
         else:
-            assert False
+            assert False"""
+
+
+class LocalAggregator(nn.Module):
+    def __init__(self, scale_multiplier, H, W, D, pc_min, grid_size, inv_softmax=False):
+        super().__init__()
+        self.scale_multiplier = scale_multiplier
+        self.H = H
+        self.W = W
+        self.D = D
+        self.register_buffer('pc_min', torch.tensor(pc_min, dtype=torch.float).unsqueeze(0))
+        self.grid_size = grid_size
+        self.inv_softmax = inv_softmax
+
+    def forward(
+            self,
+            pts,
+            means3D,
+            opacities,
+            semantics,
+            scales,
+            cov3D):
+
+        # --- Start of new batch handling logic ---
+        batch_size = pts.shape[0]
+        output_logits = []
+
+        for i in range(batch_size):
+            # Slice all tensors to get the i-th sample for processing
+            # Indexing with [i] removes the batch dimension, which is what the original code expects
+            pts_i = pts[i]
+            means3D_i = means3D[i]
+            opacities_i = opacities[i]
+            semantics_i = semantics[i]
+            scales_i = scales.detach()[i]  # Detach is still needed
+            cov3D_i = cov3D[i]
+
+            assert not pts_i.requires_grad
+
+            # --- This is the original logic, now inside the loop ---
+            points_int_i = ((pts_i - self.pc_min) / self.grid_size).to(torch.int)
+            assert points_int_i.min() >= 0 and points_int_i[:, 0].max() < self.H and points_int_i[
+                :, 1].max() < self.W and points_int_i[:, 2].max() < self.D
+
+            means3D_int_i = ((means3D_i.detach() - self.pc_min) / self.grid_size).to(torch.int)
+            assert means3D_int_i.min() >= 0 and means3D_int_i[:, 0].max() < self.H and means3D_int_i[
+                :, 1].max() < self.W and means3D_int_i[:, 2].max() < self.D
+
+            radii_i = torch.ceil(scales_i.max(dim=-1)[0] * self.scale_multiplier / self.grid_size).to(torch.int)
+            assert radii_i.min() >= 1
+
+            cov3D_flat_i = cov3D_i.flatten(1)[:, [0, 4, 8, 1, 5, 2]]
+
+            # Invoke C++/CUDA rasterization routine for the single sample
+            logits_i = _LocalAggregate.apply(
+                pts_i,
+                points_int_i,
+                means3D_i,
+                means3D_int_i,
+                opacities_i,
+                semantics_i,
+                radii_i,
+                cov3D_flat_i,
+                self.H, self.W, self.D
+            )
+            output_logits.append(logits_i)
+
+        # Stack the results from each sample back into a single batch tensor
+        final_logits = torch.cat(output_logits, dim=0)
+        # --- End of new batch handling logic ---
+
+        if not self.inv_softmax:
+            return final_logits  # n, c -> now (b, n, c) after cat
+        else:
+            assert False, "Inverse softmax not implemented for batched processing"
