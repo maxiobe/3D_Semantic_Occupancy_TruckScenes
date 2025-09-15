@@ -110,7 +110,7 @@ class GaussianHead(BaseTaskHead):
             batch_empty_scale = self.empty_scale.expand(bs, -1, -1)
             batch_empty_rot = self.empty_rot.expand(bs, -1, -1)
             batch_empty_opa = self.empty_opa.expand(bs, -1, -1)
-            empty_sem = self.empty_sem.clone().expand(bs, -1, -1)
+            empty_sem = self.empty_sem.expand(bs, -1, -1).clone()
             empty_sem[..., self.empty_label] += self.empty_scalar
 
             # Concatenate using the new batch-aware tensors
