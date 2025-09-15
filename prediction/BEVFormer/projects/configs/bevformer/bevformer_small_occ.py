@@ -13,7 +13,7 @@ plugin_dir = 'projects/mmdet3d_plugin/'
 point_cloud_range = [-75, -75, -2, 75, 75, 10.8]
 # voxel_size = [0.2, 0.2, 8]
 #voxel_size = [0.2, 0.2, 0.2]
-voxel_size = [0.2, 0.2, 16]
+voxel_size = [0.2, 0.2, 0.2] #[0.2, 0.2, 16]
 
 
 
@@ -149,7 +149,7 @@ model = dict(
         ),
     # model training and testing settings
     train_cfg=dict(pts=dict(
-        grid_size=[512, 512, 1], #[512, 512, 1],
+        grid_size=[750, 750, 64], #[512, 512, 1],
         voxel_size=voxel_size,
         point_cloud_range=point_cloud_range,
         out_size_factor=4,
@@ -270,5 +270,5 @@ log_config = dict(
     ])
 
 checkpoint_config = dict(interval=1)
-fp16 = dict(loss_scale=512.)
+#fp16 = dict(loss_scale=512.)
 find_unused_parameters = True
