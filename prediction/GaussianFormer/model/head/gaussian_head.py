@@ -88,21 +88,45 @@ class GaussianHead(BaseTaskHead):
         rotations = gaussians.rotations # b, g, 4
         opacities = gaussians.semantics # b, g, c
         origi_opa = gaussians.opacities # b, g, 1
+
+        # Get the dynamic batch size
+        bs = means.shape[0] # New
+
         if origi_opa.numel() == 0:
             origi_opa = torch.ones_like(opacities[..., :1], requires_grad=False)
+
         if self.with_emtpy:
             assert opacities.shape[-1] == self.num_classes - 1
             if 'kitti' in self.dataset_type:
                 opacities = torch.cat([torch.zeros_like(opacities[..., :1]), opacities], dim=-1)
             else:
                 opacities = torch.cat([opacities, torch.zeros_like(opacities[..., :1])], dim=-1)
-            means = torch.cat([means, self.empty_mean], dim=1)
+
+
+            ################ New ######################################
+            # Expand empty tensors to match the current batch size
+            # The -1 tells expand to keep the original size for that dimension
+            batch_empty_mean = self.empty_mean.expand(bs, -1, -1)
+            batch_empty_scale = self.empty_scale.expand(bs, -1, -1)
+            batch_empty_rot = self.empty_rot.expand(bs, -1, -1)
+            batch_empty_opa = self.empty_opa.expand(bs, -1, -1)
+            empty_sem = self.empty_sem.clone().expand(bs, -1, -1)
+            empty_sem[..., self.empty_label] += self.empty_scalar
+
+            # Concatenate using the new batch-aware tensors
+            means = torch.cat([means, batch_empty_mean], dim=1)
+            scales = torch.cat([scales, batch_empty_scale], dim=1)
+            rotations = torch.cat([rotations, batch_empty_rot], dim=1)
+            opacities = torch.cat([opacities, empty_sem], dim=1)
+            origi_opa = torch.cat([origi_opa, batch_empty_opa], dim=1)
+
+            """means = torch.cat([means, self.empty_mean], dim=1)
             scales = torch.cat([scales, self.empty_scale], dim=1)
             rotations = torch.cat([rotations, self.empty_rot], dim=1)
             empty_sem = self.empty_sem.clone()
             empty_sem[..., self.empty_label] += self.empty_scalar
             opacities = torch.cat([opacities, empty_sem], dim=1)
-            origi_opa = torch.cat([origi_opa, self.empty_opa], dim=1)
+            origi_opa = torch.cat([origi_opa, self.empty_opa], dim=1)"""
         elif self.use_localaggprob:
             assert opacities.shape[-1] == self.num_classes - 1
             opacities = opacities.softmax(dim=-1)
