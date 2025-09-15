@@ -173,10 +173,10 @@ class SparseOcc(MVXTwoStageDetector):
         assert len(img_metas) == 1  # batch_size = 1
 
         B, N, C, H, W = img.shape
-        img = img.reshape(B, N//6, 6, C, H, W)
+        img = img.reshape(B, N//4, 4, C, H, W) #img.reshape(B, N//6, 6, C, H, W)
 
         img_filenames = img_metas[0]['filename']
-        num_frames = len(img_filenames) // 6
+        num_frames = len(img_filenames) // 4 #//6
         # assert num_frames == img.shape[1]
 
         img_shape = (H, W, C)
@@ -188,7 +188,7 @@ class SparseOcc(MVXTwoStageDetector):
 
         # extract feature frame by frame
         for i in range(num_frames):
-            img_indices = list(np.arange(i * 6, (i + 1) * 6))
+            img_indices = list(np.arange(i * 4, (i + 1) * 4)) # list(np.arange(i * 6, (i + 1) * 6))
 
             img_metas_curr = [{}]
             for k in img_metas[0].keys():
