@@ -5,7 +5,7 @@ from prettytable import PrettyTable
 class Metric_RayPQ:
     def __init__(self,
                  occ_class_names, 
-                 num_classes=18,
+                 num_classes=17,
                  thresholds=[1, 2, 4]):
         """
         Args:

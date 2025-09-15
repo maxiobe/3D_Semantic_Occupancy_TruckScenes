@@ -44,7 +44,7 @@ def getNumUniqueCells(cells):
 class Metric_mIoU():
     def __init__(self,
                  save_dir='.',
-                 num_classes=18,
+                 num_classes=17,
                  use_lidar_mask=False,
                  use_image_mask=False,
                  ):
@@ -55,6 +55,13 @@ class Metric_mIoU():
                 'driveable_surface', 'other_flat', 'sidewalk',
                 'terrain', 'manmade', 'vegetation','free'
             ]
+        elif num_classes == 17:
+            self.class_names = [
+                'noise', 'barrier', 'bicycle', 'bus', 'car', 'construction_vehicle',
+                'motorcycle', 'pedestrian', 'traffic_cone', 'trailer', 'truck',
+                'animal', 'traffic_sign', 'other_vehicle',
+                'train', 'background', 'free'
+            ]
         elif num_classes == 2:
             self.class_names = ['non-free', 'free']
         
@@ -63,9 +70,12 @@ class Metric_mIoU():
         self.use_image_mask = use_image_mask
         self.num_classes = num_classes
 
-        self.point_cloud_range = [-40.0, -40.0, -1.0, 40.0, 40.0, 5.4]
-        self.occupancy_size = [0.4, 0.4, 0.4]
-        self.voxel_size = 0.4
+        #self.point_cloud_range = [-40.0, -40.0, -1.0, 40.0, 40.0, 5.4]
+        self.point_cloud_range = [-75, -75, -2.0, 75, 75, 10.8]
+        #self.occupancy_size = [0.4, 0.4, 0.4]
+        self.occupancy_size = [0.2, 0.2, 0.2]
+        #self.voxel_size = 0.4
+        self.voxel_size = [0.2]
         self.occ_xdim = int((self.point_cloud_range[3] - self.point_cloud_range[0]) / self.occupancy_size[0])
         self.occ_ydim = int((self.point_cloud_range[4] - self.point_cloud_range[1]) / self.occupancy_size[1])
         self.occ_zdim = int((self.point_cloud_range[5] - self.point_cloud_range[2]) / self.occupancy_size[2])
@@ -158,9 +168,9 @@ class Metric_FScore():
                  leaf_size=10,
                  threshold_acc=0.6,
                  threshold_complete=0.6,
-                 voxel_size=[0.4, 0.4, 0.4],
-                 range=[-40, -40, -1, 40, 40, 5.4],
-                 void=[17, 255],
+                 voxel_size=[0.2, 0.2, 0.2],
+                 range=[-75, -75, -2, 75, 75, 10.8],
+                 void=[16, 255],
                  use_lidar_mask=False,
                  use_image_mask=False, ) -> None:
 

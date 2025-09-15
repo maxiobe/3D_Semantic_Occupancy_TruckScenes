@@ -11,8 +11,8 @@ from .ray_pq import Metric_RayPQ
 
 
 dvr = load("dvr", sources=["lib/dvr/dvr.cpp", "lib/dvr/dvr.cu"], verbose=True, extra_cuda_cflags=['-allow-unsupported-compiler'])
-_pc_range = [-40, -40, -1.0, 40, 40, 5.4]
-_voxel_size = 0.4
+_pc_range = [-75, -75, -2.0, 75, 75, 10.8]
+_voxel_size = 0.2 #0.4
 
 
 # https://github.com/tarashakhurana/4d-occ-forecasting/blob/ff986082cd6ea10e67ab7839bf0e654736b3f4e2/test_fgbg.py#L29C1-L46C16
@@ -106,7 +106,7 @@ def process_one_sample(sem_pred, lidar_rays, output_origin, instance_pred=None, 
                 output_origin_render.cuda(),
                 output_points_render.cuda(),
                 output_tindex_render.cuda(),
-                [1, 16, 200, 200],
+                [1, 64, 750, 750], #[1, 16, 200, 200],
                 "test"
             )
             pred_dist *= _voxel_size
@@ -181,8 +181,8 @@ def main_rayiou(sem_pred_list, sem_gt_list, lidar_origin_list, occ_class_names):
 
     pcd_pred_list, pcd_gt_list = [], []
     for sem_pred, sem_gt, lidar_origins in tqdm(zip(sem_pred_list, sem_gt_list, lidar_origin_list), ncols=50):
-        sem_pred = torch.from_numpy(np.reshape(sem_pred, [200, 200, 16]))
-        sem_gt = torch.from_numpy(np.reshape(sem_gt, [200, 200, 16]))
+        sem_pred = torch.from_numpy(np.reshape(sem_pred, [750, 750, 64])) #[200, 200, 16]
+        sem_gt = torch.from_numpy(np.reshape(sem_gt, [750, 750, 64])) #[200, 200, 16]
 
         pcd_pred = process_one_sample(sem_pred, lidar_rays, lidar_origins, occ_class_names=occ_class_names)
         pcd_gt = process_one_sample(sem_gt, lidar_rays, lidar_origins, occ_class_names=occ_class_names)
@@ -243,11 +243,11 @@ def main_raypq(sem_pred_list, sem_gt_list, inst_pred_list, inst_gt_list, lidar_o
 
     for sem_pred, sem_gt, inst_pred, inst_gt, lidar_origins in \
         tqdm(zip(sem_pred_list, sem_gt_list, inst_pred_list, inst_gt_list, lidar_origin_list), ncols=50):
-        sem_pred = torch.from_numpy(np.reshape(sem_pred, [200, 200, 16]))
-        sem_gt = torch.from_numpy(np.reshape(sem_gt, [200, 200, 16]))
+        sem_pred = torch.from_numpy(np.reshape(sem_pred, [750, 750, 64])) #[200, 200, 16]
+        sem_gt = torch.from_numpy(np.reshape(sem_gt, [750, 750, 64])) #[200, 200, 16]
 
-        inst_pred = torch.from_numpy(np.reshape(inst_pred, [200, 200, 16]))
-        inst_gt = torch.from_numpy(np.reshape(inst_gt, [200, 200, 16]))
+        inst_pred = torch.from_numpy(np.reshape(inst_pred, [750, 750, 64])) #[200, 200, 16]
+        inst_gt = torch.from_numpy(np.reshape(inst_gt, [750, 750, 64])) # [200, 200, 16]
 
         pcd_pred = process_one_sample(sem_pred, lidar_rays, lidar_origins, instance_pred=inst_pred, occ_class_names=occ_class_names)
         pcd_gt = process_one_sample(sem_gt, lidar_rays, lidar_origins, instance_pred=inst_gt, occ_class_names=occ_class_names)
