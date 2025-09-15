@@ -166,7 +166,7 @@ data_root = '/truckscenes/'
 file_client_args = dict(backend='disk')
 # occ_gt_data_root='/home/max/ssd/Masterarbeit/TruckScenes/mini/v1.0-mini/'
 occ_gt_data_root = '/gts/'
-anno_root = '/code/prediction/BEVFormer/data_info/mini/'
+anno_root = '/code/prediction/BEVFormer/data_info/trainval/'
 
 train_pipeline = [
     dict(type='LoadMultiViewImageFromFiles', to_float32=True),
