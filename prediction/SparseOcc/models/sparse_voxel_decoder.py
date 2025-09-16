@@ -72,7 +72,7 @@ class SparseVoxelDecoder(BaseModule):
         self.num_layers = num_layers
         self.pc_range = pc_range
         self.semantic = semantic
-        self.voxel_dim = [200, 200, 16]
+        self.voxel_dim = [750, 750, 64]
         self.topk_training = topk_training
         self.topk_testing = topk_testing
 
