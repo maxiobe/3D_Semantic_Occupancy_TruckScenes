@@ -97,6 +97,12 @@ class NuSceneOcc(NuScenesDataset):
                 metas_map[i]['can_bus'][-1] -= prev_angle
                 prev_pos = copy.deepcopy(tmp_pos)
                 prev_angle = copy.deepcopy(tmp_angle)
+
+        for i, meta in metas_map.items():
+            for k, v in meta.items():
+                if isinstance(v, type({}.keys())):
+                    meta[k] = list(v)
+
         queue[-1]['img'] = DC(torch.stack(imgs_list), cpu_only=False, stack=True)
         queue[-1]['img_metas'] = DC(metas_map, cpu_only=True)
         queue = queue[-1]
