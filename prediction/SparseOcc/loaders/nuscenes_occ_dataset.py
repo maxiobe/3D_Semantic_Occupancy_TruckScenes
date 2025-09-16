@@ -163,7 +163,7 @@ class NuSceneOcc(NuScenesDataset):
                 mask_camera=None,  # Not needed if use_image_mask=False
             )
 
-            if 'pano_inst' in occ_pred.keys():
+            """if 'pano_inst' in occ_pred.keys():
                 pano_inst = torch.from_numpy(occ_pred['pano_inst'])
                 pano_sem = torch.from_numpy(occ_pred['pano_sem'])
 
@@ -179,14 +179,16 @@ class NuSceneOcc(NuScenesDataset):
 
             lidar_origins.append(output_origin)
             occ_gts.append(gt_semantics)
-            occ_preds.append(sem_pred)
+            occ_preds.append(sem_pred)"""
 
         print('\n--- Voxel-based mIoU Results ---')
         final_miou = miou_calculator.count_miou()
 
         eval_results = {'mIoU': final_miou}
+
+        return eval_results
         
-        if len(inst_preds) > 0:
+        """if len(inst_preds) > 0:
             results = main_raypq(occ_preds, occ_gts, inst_preds, inst_gts, lidar_origins, occ_class_names=occ_class_names)
             results.update(main_rayiou(occ_preds, occ_gts, lidar_origins, occ_class_names=occ_class_names))
             eval_results.update(results)
@@ -194,7 +196,7 @@ class NuSceneOcc(NuScenesDataset):
         else:
             ray_results = main_rayiou(occ_preds, occ_gts, lidar_origins, occ_class_names=occ_class_names)
             eval_results.update(ray_results)
-            return eval_results
+            return eval_results"""
 
     def format_results(self, occ_results, submission_prefix, **kwargs):
         if submission_prefix is not None:
