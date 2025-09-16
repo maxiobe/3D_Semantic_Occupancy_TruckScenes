@@ -42,7 +42,7 @@ class NuSceneOcc(NuScenesDataset):
         Returns:
             list[dict]: List of annotations sorted by timestamps.
         """
-        data = mmcv.load(ann_file)
+        data = mmcv.load(ann_file, file_format='pkl')
         # self.train_split=data['train_split']
         # self.val_split=data['val_split']
         data_infos = list(sorted(data['infos'], key=lambda e: e['timestamp']))
