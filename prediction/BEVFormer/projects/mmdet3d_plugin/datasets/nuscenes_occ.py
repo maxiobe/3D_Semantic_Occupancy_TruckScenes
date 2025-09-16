@@ -98,10 +98,18 @@ class NuSceneOcc(NuScenesDataset):
                 prev_pos = copy.deepcopy(tmp_pos)
                 prev_angle = copy.deepcopy(tmp_angle)
 
+        def convert_dict_keys(obj):
+            if isinstance(obj, dict):
+                return {k: convert_dict_keys(v) for k, v in obj.items()}
+            elif isinstance(obj, type({}.keys())):  # dict_keys
+                return list(obj)
+            elif isinstance(obj, list):
+                return [convert_dict_keys(x) for x in obj]
+            else:
+                return obj
+
         for i, meta in metas_map.items():
-            for k, v in meta.items():
-                if isinstance(v, type({}.keys())):
-                    meta[k] = list(v)
+            metas_map[i] = convert_dict_keys(meta)
 
         queue[-1]['img'] = DC(torch.stack(imgs_list), cpu_only=False, stack=True)
         queue[-1]['img_metas'] = DC(metas_map, cpu_only=True)
