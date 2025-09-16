@@ -111,7 +111,7 @@ model = dict(
             loss_geo_scal=dict(
                 type='GeoScalLoss',
                 num_classes=len(occ_class_names),
-                loss_weight=1.0
+                loss_weight=0.0 #
             ),
             loss_sem_scal=dict(
                 type='SemScalLoss',
@@ -199,7 +199,7 @@ data = dict(
 
 optimizer = dict(
     type='AdamW',
-    lr=1e-4, #5e-4
+    lr=5e-5, #5e-4
     paramwise_cfg=dict(
         custom_keys={
             'img_backbone': dict(lr_mult=0.1),
@@ -207,13 +207,13 @@ optimizer = dict(
         }),
     weight_decay=0.01
 )
-optimizer_config = dict(grad_clip=dict(max_norm=25, norm_type=2)) #max_norm=35
+optimizer_config = dict(grad_clip=dict(max_norm=15, norm_type=2)) #max_norm=35
 
 lr_config = dict(
     policy='CosineAnnealing', #'step'
     warmup='linear',
     warmup_iters=2000, # 500
-    warmup_ratio=1.0 / 1000,
+    warmup_ratio=1.0 / 1000, # 1.0 / 3.0
     min_lr=1e-6,
     by_epoch=False
     #by_epoch=True,
@@ -239,7 +239,7 @@ log_config = dict(
     interval=1,
     hooks=[
         dict(type='MyTextLoggerHook', interval=1, reset_flag=True),
-        dict(type='MyTensorboardLoggerHook', interval=50, reset_flag=True) #interval=500
+        dict(type='MyTensorboardLoggerHook', interval=1, reset_flag=True) #interval=500
     ]
 )
 
