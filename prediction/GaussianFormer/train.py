@@ -64,6 +64,13 @@ def main(local_rank, args):
     log_file = osp.join(args.work_dir, f'{timestamp}.log')
     logger = MMLogger('selfocc', log_file=log_file)
     MMLogger._instance_dict['selfocc'] = logger
+
+    if local_rank == 0:
+        logger.info("--- GPU Detection Check ---")
+        logger.info(f"torch.cuda.device_count() sees {args.gpus} GPUs.")
+        logger.info(f"DDP world size is {world_size}.")
+        logger.info("--- End Check ---")
+    
     logger.info(f'Config:\n{cfg.pretty_text}')
 
     # build model
