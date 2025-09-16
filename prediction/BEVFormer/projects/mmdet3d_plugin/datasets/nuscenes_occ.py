@@ -98,19 +98,6 @@ class NuSceneOcc(NuScenesDataset):
                 prev_pos = copy.deepcopy(tmp_pos)
                 prev_angle = copy.deepcopy(tmp_angle)
 
-        def convert_dict_keys(obj):
-            if isinstance(obj, dict):
-                return {k: convert_dict_keys(v) for k, v in obj.items()}
-            elif isinstance(obj, type({}.keys())):  # dict_keys
-                return list(obj)
-            elif isinstance(obj, list):
-                return [convert_dict_keys(x) for x in obj]
-            else:
-                return obj
-
-        for i, meta in metas_map.items():
-            metas_map[i] = convert_dict_keys(meta)
-
         queue[-1]['img'] = DC(torch.stack(imgs_list), cpu_only=False, stack=True)
         queue[-1]['img_metas'] = DC(metas_map, cpu_only=True)
         queue = queue[-1]
@@ -209,14 +196,32 @@ class NuSceneOcc(NuScenesDataset):
         Returns:
             dict: Data dictionary of the corresponding index.
         """
+
+        def make_pickleable(obj):
+            if isinstance(obj, dict):
+                return {k: make_pickleable(v) for k, v in obj.items()}
+            elif isinstance(obj, type({}.keys())):  # dict_keys
+                return list(obj)
+            elif isinstance(obj, list):
+                return [make_pickleable(x) for x in obj]
+            else:
+                return obj
+
         if self.test_mode:
-            return self.prepare_test_data(idx)
+
+            data = self.prepare_test_data(idx) #
+            data = make_pickleable(data) #
+            return data #
+
+            #return self.prepare_test_data(idx)
         while True:
 
             data = self.prepare_train_data(idx)
             if data is None:
                 idx = self._rand_another(idx)
                 continue
+
+            data = make_pickleable(data) #
             return data
 
     def evaluate_miou(self, occ_results, runner=None, show_dir=None, **eval_kwargs):
