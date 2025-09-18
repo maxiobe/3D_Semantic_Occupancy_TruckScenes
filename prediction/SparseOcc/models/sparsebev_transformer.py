@@ -229,7 +229,7 @@ class SparseBEVSelfAttention(BaseModule):
 
             tau = tau.permute(0, 2, 1)  # [B, 8, Q]
             #attn_mask = dist[:, None, :, :] * tau[..., None]  # [B, 8, Q, Q]
-            attn_mask = self.build_attn_mask(dist, tau, chunk_size=1024)
+            attn_mask = self.build_attn_mask(dist, tau, chunk_size=256)
             if pre_attn_mask is not None:
                 attn_mask[:, :, pre_attn_mask] = float('-inf')
             attn_mask = attn_mask.flatten(0, 1)  # [Bx8, Q, Q]
