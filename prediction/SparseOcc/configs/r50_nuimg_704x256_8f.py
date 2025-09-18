@@ -111,7 +111,7 @@ model = dict(
             loss_geo_scal=dict(
                 type='GeoScalLoss',
                 num_classes=len(occ_class_names),
-                loss_weight=0.0 #
+                loss_weight=1.0 #
             ),
             loss_sem_scal=dict(
                 type='SemScalLoss',
@@ -221,7 +221,7 @@ lr_config = dict(
     #gamma=0.2
 )
 total_epochs = 24
-batch_size = 8
+batch_size = 4
 
 # load pretrained weights
 # load_from = 'pretrain/cascade_mask_rcnn_r50_fpn_coco-20e_20e_nuim_20201009_124951-40963960.pth'
@@ -251,3 +251,4 @@ eval_config = dict(
 
 # other flags
 debug = False
+fp16 = dict(loss_scale='dynamic')
