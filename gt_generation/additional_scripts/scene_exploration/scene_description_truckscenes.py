@@ -60,8 +60,21 @@ def main(datroot, version):
     print("\n--- Construction Scenario Counts ---")
     print(dict(construction_counts))
 
+
+
 if __name__ == "__main__":
 
     data_root = '/home/max/ssd/Masterarbeit/TruckScenes/trainval/v1.0-trainval'
     version = 'v1.0-trainval'
+    print("Processing scenes for trainval:")
+    main(data_root, version)
+
+    data_root = '/home/max/ssd/Masterarbeit/TruckScenes/test/v1.0-test'
+    version = 'v1.0-test'
+    print("Processing scenes for test:")
+    main(data_root, version)
+
+    data_root = '/home/max/ssd/Masterarbeit/TruckScenes/mini/v1.0-mini'
+    version = 'v1.0-mini'
+    print("Processing scenes for test:")
     main(data_root, version)
