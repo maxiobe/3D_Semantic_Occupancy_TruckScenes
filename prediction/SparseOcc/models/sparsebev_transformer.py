@@ -269,7 +269,7 @@ class SparseBEVSelfAttention(BaseModule):
         dist = -dist
 
         return dist"""
-        return self.calc_bbox_dists_batched(bboxes, chunk_size=256, col_chunk=256)
+        return self.calc_bbox_dists_batched(bboxes, row_size=256, col_chunk=256)
 
     @torch.no_grad()
     def calc_bbox_dists_batched(self, bboxes, row_chunk=256, col_chunk=256):
