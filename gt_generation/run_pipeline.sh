@@ -12,7 +12,7 @@ ENV_POSTPROCESS="occ_kiss_p3d"
 # For step 1
 CONFIG_PATH="config_truckscenes.yaml"
 LABEL_MAPPING="truckscenes.yaml"
-SAVE_PATH_GT="/home/max/ssd/Masterarbeit/TruckScenes/trainval/v1.0-trainval/gts_64"
+SAVE_PATH_GT="/home/max/ssd/Masterarbeit/TruckScenes/trainval/v1.0-trainval/gts_64/hail"
 #SAVE_PATH_GT="/home/max/ssd/Masterarbeit/TruckScenes/mini/v1.0-mini/gts_low_64"
 # SAVE_PATH_GT="/dss/dssfs02/lwp-dss-0001/t7441/t7441-dss-0000/ge84von2/mini/gts"
 DATA_ROOT="/home/max/ssd/Masterarbeit/TruckScenes/trainval/v1.0-trainval"
@@ -22,8 +22,8 @@ VERSION="v1.0-trainval"
 #VERSION="v1.0-mini"
 #SPLIT="train"
 SPLIT="all"
-START=364
-END=365
+START=380
+END=381
 LOAD_MODE="pointwise"
 
 USE_FLEXCLOUD=0
@@ -76,7 +76,8 @@ do
         --use_flexcloud "$USE_FLEXCLOUD" \
         --filter_lidar_intensity \
         --icp_refinement \
-        --run_mapmos \
+        #--run_mapmos \
+        #--vis_raw_pc \
         #--vis_static_frame_comparison_kiss_refined \
         #--pose_error_plot \
         #--vis_aggregated_static_ego_ref_pc \

@@ -443,7 +443,7 @@ def main(trucksc, indice, truckscenesyaml, args, config):
 
         pc_for_icp = sensor_fused_pc.points.T[initial_keep_for_icp_mask_np]
 
-        if args.filter_lidar_intensity and weather in ['snow', 'rain', 'fog']:
+        if args.filter_lidar_intensity and weather in ['snow', 'rain', 'fog', 'hail']:
             print(f"Applying special conditional intensity filter to ICP data for weather: '{weather}'...")
 
             # Identify which points in our current `pc_for_icp` were inside ANY original bounding box.
