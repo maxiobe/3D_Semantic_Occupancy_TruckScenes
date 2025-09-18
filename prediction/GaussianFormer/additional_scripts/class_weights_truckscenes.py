@@ -9,6 +9,13 @@ trsc_class_frequencies = np.array([
     3168, 2005
 ])
 
+trsc_class_frequencies_occupancy = np.array([
+    820511, 271429, 292283, 5477952, 139564017, 
+    3554278, 275585, 1157896, 1121443, 173378212,
+    84734644, 36222, 31427066, 6857852, 53672547,
+    7437846035, 852531512028
+])
+
 num_classes = 17
 
 def class_weights_nuscenes(class_freqs):
@@ -84,10 +91,10 @@ def class_weights(class_freqs):
 if __name__ == "__main__":
 
     class_weights_nuscenes(trsc_class_frequencies)
+    class_weights_nuscenes(trsc_class_frequencies_occupancy)
+    #class_weights_effective_number_samples(trsc_class_frequencies)
 
-    class_weights_effective_number_samples(trsc_class_frequencies)
+    #inverse_weights = class_weights_inverse_frequency(trsc_class_frequencies)
 
-    inverse_weights = class_weights_inverse_frequency(trsc_class_frequencies)
-
-    class_weights(trsc_class_frequencies)
+    #class_weights(trsc_class_frequencies)
 
