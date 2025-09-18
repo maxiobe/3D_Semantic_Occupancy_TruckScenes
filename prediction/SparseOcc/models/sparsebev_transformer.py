@@ -199,6 +199,22 @@ class SparseBEVSelfAttention(BaseModule):
             nn.init.zeros_(self.gen_tau.weight)
             nn.init.uniform_(self.gen_tau.bias, 0.0, 2.0)
 
+    def build_attn_mask(self, dist, tau, chunk_size=1024):
+        """
+        dist: [B, Q, Q]
+        tau: [B, 8, Q]
+        Returns: [B, 8, Q, Q]
+        """
+        B, Q, _ = dist.shape
+        attn_chunks = []
+        for i in range(0, Q, chunk_size):
+            end = min(i + chunk_size, Q)
+            # dist[:, None, i:end, :] -> [B, 1, chunk_size, Q]
+            # tau[:, :, i:end, None] -> [B, 8, chunk_size, 1]
+            chunk = dist[:, None, i:end, :] * tau[:, :, i:end, None]
+            attn_chunks.append(chunk)
+        return torch.cat(attn_chunks, dim=2)
+
     def inner_forward(self, query_bbox, query_feat, pre_attn_mask=None):
         """
         query_bbox: [B, Q, 10]
@@ -212,7 +228,8 @@ class SparseBEVSelfAttention(BaseModule):
                 torch.save(tau, '{}/sasa_tau_stage{}.pth'.format(DUMP.out_dir, DUMP.stage_count))
 
             tau = tau.permute(0, 2, 1)  # [B, 8, Q]
-            attn_mask = dist[:, None, :, :] * tau[..., None]  # [B, 8, Q, Q]
+            #attn_mask = dist[:, None, :, :] * tau[..., None]  # [B, 8, Q, Q]
+            attn_mask = self.build_attn_mask(dist, tau, chunk_size=1024)
             if pre_attn_mask is not None:
                 attn_mask[:, :, pre_attn_mask] = float('-inf')
             attn_mask = attn_mask.flatten(0, 1)  # [Bx8, Q, Q]
