@@ -55,7 +55,7 @@ RUN conda run -n bev-former pip install torch==2.0.0 torchvision==0.15.1 torchau
 #RUN conda run -n bev-former pip install -e .
 RUN conda run -n bev-former pip install numba==0.53.0 llvmlite==0.36.0
 RUN conda run -n bev-former pip install mmcv-full==1.7.0 -f https://download.openmmlab.com/mmcv/dist/cu118/torch2.0.0/index.html
-RUN conda run -n bev-former pip install mmdet==2.29.1
+RUN conda run -n bev-former pip install mmdet==2.28.2
 RUN conda run -n bev-former pip install mmsegmentation==0.30.0
 RUN conda run -n bev-former pip install mmdet3d==1.0.0rc6
 # 2. Install mmcv (prebuilt for CUDA 11.8 & Torch 2.0)
