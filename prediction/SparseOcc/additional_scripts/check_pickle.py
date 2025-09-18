@@ -3,7 +3,7 @@ import pickle
 # Replace with the path to your .pkl file
 file_path = '/home/max/Desktop/Masterarbeit/Python/SparseOcc/data/nuscenes/nuscenes_infos_train_sweep.pkl'
 
-file_path = '/home/max/Desktop/Masterarbeit/Python/3D_Semantic_Occupancy_TruckScenes/prediction/SparseOcc/data_info/occ_infos_train.pkl'
+#file_path = '/home/max/Desktop/Masterarbeit/Python/3D_Semantic_Occupancy_TruckScenes/prediction/SparseOcc/data_info/occ_infos_train_sweep.pkl'
 
 
 def inspect_nested_keys(data, parent_key_name='root'):

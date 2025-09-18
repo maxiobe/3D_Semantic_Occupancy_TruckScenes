@@ -9,10 +9,8 @@ def crop_occupancy_grid(input_path, output_path, verbose=True):
     """
     Loads a .npz occupancy grid, crops its arrays to 736x736x32, and saves to a new file.
     """
-    # --- CROP DEFINITIONS FOR 736x736x32 from 744x744x64 ---
-    # X and Y axes: Crop 8 voxels total (744-736), so 4 from each side.
-    X_START, X_END = 4, 740  # 4:(744-4) -> shape 736
-    Y_START, Y_END = 4, 740  # 4:(744-4) -> shape 736
+    X_START, X_END = 7, 743
+    Y_START, Y_END = 7, 743
 
     # Z axis: Crop 5 from the bottom, resulting in a size of 32.
     Z_START, Z_END = 5, 37  # 5:(5+32) -> shape 32
@@ -94,7 +92,6 @@ def main(data_root, version, gts_path, save_path):
 if __name__ == '__main__':
     data_root = '/home/max/ssd/Masterarbeit/TruckScenes/trainval/v1.0-trainval'
     version = 'v1.0-trainval'
-    # Source path of your 744x744x64 grids
     gts_path = '/home/max/ssd/Masterarbeit/TruckScenes/trainval/v1.0-trainval/gts_64'
     # New destination path for the cropped 736x736x32 grids
     save_path = '/home/max/ssd/Masterarbeit/TruckScenes/trainval/v1.0-trainval/gts_736x32'
