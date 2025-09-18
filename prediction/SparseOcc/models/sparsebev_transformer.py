@@ -199,21 +199,33 @@ class SparseBEVSelfAttention(BaseModule):
             nn.init.zeros_(self.gen_tau.weight)
             nn.init.uniform_(self.gen_tau.bias, 0.0, 2.0)
 
-    def build_attn_mask(self, dist, tau, chunk_size=256):
+    def build_attn_mask(self, dist, tau, row_chunk=256, col_chunk=256):
         """
         dist: [B, Q, Q]
         tau: [B, 8, Q]
         Returns: [B, 8, Q, Q]
         """
         B, Q, _ = dist.shape
-        attn_chunks = []
-        for i in range(0, Q, chunk_size):
-            end = min(i + chunk_size, Q)
-            # dist[:, None, i:end, :] -> [B, 1, chunk_size, Q]
-            # tau[:, :, i:end, None] -> [B, 8, chunk_size, 1]
-            chunk = dist[:, None, i:end, :] * tau[:, :, i:end, None]
-            attn_chunks.append(chunk)
-        return torch.cat(attn_chunks, dim=2)
+        result_rows = []
+
+        for i in range(0, Q, row_chunk):
+            row_end = min(i + row_chunk, Q)
+            tau_row = tau[:, :, i:row_end]  # [B, 8, row_chunk]
+            row_chunks = []
+
+            for j in range(0, Q, col_chunk):
+                col_end = min(j + col_chunk, Q)
+
+                dist_block = dist[:, None, i:row_end, j:col_end]  # [B, 1, row_chunk, col_chunk]
+                tau_block = tau_row[..., None]  # [B, 8, row_chunk, 1]
+
+                block = dist_block * tau_block  # [B, 8, row_chunk, col_chunk]
+                row_chunks.append(block)
+
+            row_concat = torch.cat(row_chunks, dim=-1)  # [B, 8, row_chunk, Q]
+            result_rows.append(row_concat)
+
+        return torch.cat(result_rows, dim=2)  # [B, 8, Q, Q]
 
     def inner_forward(self, query_bbox, query_feat, pre_attn_mask=None):
         """
@@ -229,7 +241,7 @@ class SparseBEVSelfAttention(BaseModule):
 
             tau = tau.permute(0, 2, 1)  # [B, 8, Q]
             #attn_mask = dist[:, None, :, :] * tau[..., None]  # [B, 8, Q, Q]
-            attn_mask = self.build_attn_mask(dist, tau, chunk_size=256)
+            attn_mask = self.build_attn_mask(dist, tau, row_chunk=256, col_chunk=256)
             if pre_attn_mask is not None:
                 attn_mask[:, :, pre_attn_mask] = float('-inf')
             attn_mask = attn_mask.flatten(0, 1)  # [Bx8, Q, Q]
@@ -257,61 +269,56 @@ class SparseBEVSelfAttention(BaseModule):
         dist = -dist
 
         return dist"""
-        return self.calc_bbox_dists_batched(bboxes, chunk_size=256)
+        return self.calc_bbox_dists_batched(bboxes, chunk_size=256, col_chunk=256)
 
     @torch.no_grad()
-    def calc_bbox_dists_batched(self, bboxes, chunk_size=256):
+    def calc_bbox_dists_batched(self, bboxes, row_chunk=256, col_chunk=256):
         """
         Calculates pairwise distances between bounding box centers in a memory-efficient,
-        chunked manner.
+        row × col chunked manner.
 
         Args:
             bboxes (torch.Tensor): Tensor of bounding boxes with shape [B, Q, 10].
-            chunk_size (int): The size of chunks to process for memory efficiency.
-                              A smaller size uses less memory but may be slower.
+            row_chunk (int): Chunk size along rows.
+            col_chunk (int): Chunk size along columns.
 
         Returns:
             torch.Tensor: A tensor of negative pairwise distances with shape [B, Q, Q].
         """
-        # Step 1: Simplify 3D boxes to 2D center points (x, y)
-        centers = decode_bbox(bboxes, self.pc_range)[..., :2]  # Shape: [B, Q, 2]
+        centers = decode_bbox(bboxes, self.pc_range)[..., :2]  # [B, Q, 2]
         B, Q, _ = centers.shape
 
-        # Initialize a list to store the final distance matrix for each batch sample
-        dist_matrices = []
+        dist_batches = []
 
-        # Loop over each sample in the batch
         for b in range(B):
-            sample_centers = centers[b]  # Shape: [Q, 2]
-            dist_chunks = []
+            sample_centers = centers[b]  # [Q, 2]
+            row_blocks = []
 
-            # Step 2: Loop through the rows of the distance matrix in chunks
-            for i in range(0, Q, chunk_size):
-                # Define the end index of the current chunk
-                end = min(i + chunk_size, Q)
+            for i in range(0, Q, row_chunk):
+                row_end = min(i + row_chunk, Q)
+                row_centers = sample_centers[i:row_end]  # [row_chunk, 2]
 
-                # Get the current chunk of centers (the "rows" of our matrix)
-                chunk = sample_centers[i:end]  # Shape: [current_chunk_size, 2]
+                col_blocks = []
+                for j in range(0, Q, col_chunk):
+                    col_end = min(j + col_chunk, Q)
+                    col_centers = sample_centers[j:col_end]  # [col_chunk, 2]
 
-                # Calculate distances from this chunk to ALL other points in the sample.
-                # This creates a [current_chunk_size, Q] slice of the final matrix.
-                dist_chunk = torch.norm(
-                    chunk.reshape(-1, 1, 2) - sample_centers.reshape(1, -1, 2),
-                    dim=-1
-                )
-                dist_chunks.append(dist_chunk)
+                    # [row_chunk, col_chunk]
+                    dist_block = torch.norm(
+                        row_centers[:, None, :] - col_centers[None, :, :],
+                        dim=-1
+                    )
+                    col_blocks.append(dist_block)
 
-            # Stitch all the [chunk_size, Q] slices together to form the full [Q, Q] matrix
-            dist_b = torch.cat(dist_chunks, dim=0)
-            dist_matrices.append(dist_b[None, ...])  # Add batch dimension for later concatenation
+                # concat along columns → [row_chunk, Q]
+                row_blocks.append(torch.cat(col_blocks, dim=1))
 
-        # Step 3: Combine results from all samples and prepare for attention
-        dist = torch.cat(dist_matrices, dim=0)  # Shape: [B, Q, Q]
+            # concat along rows → [Q, Q]
+            dist_full = torch.cat(row_blocks, dim=0)
+            dist_batches.append(dist_full[None, ...])
 
-        # Negate the distances so that larger distances result in lower attention scores
-        dist = -dist
-
-        return dist
+        dist = torch.cat(dist_batches, dim=0)  # [B, Q, Q]
+        return -dist
 
 
 class SparseBEVSampling(BaseModule):
