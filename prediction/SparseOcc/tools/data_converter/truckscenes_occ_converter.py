@@ -8,6 +8,7 @@ import simplejson as json
 from mmdet3d.datasets import NuScenesDataset
 from truckscenes.truckscenes import TruckScenes
 from truckscenes.utils import splits as truckscenes_splits
+from truckscenes.utils.geometry_utils import BoxVisibility
 
 
 def get_sensor_info(trsc, sensor_token):
@@ -26,6 +27,45 @@ def get_sensor_info(trsc, sensor_token):
         'ego2global_rotation': pose_record['rotation'],
         'timestamp': sd_rec['timestamp'],
     }
+
+def get_sensor2lidar(trsc, sensor_token, ref_l2e_t, ref_l2e_r, ref_e2g_t, ref_e2g_r):
+    """
+    Compute transform from sensor to reference lidar frame.
+    Arguments:
+        nusc: dataset object
+        sensor_token: token of the sensor sample_data
+        ref_l2e_t, ref_l2e_r: lidar->ego translation/rotation of the reference lidar
+        ref_e2g_t, ref_e2g_r: ego->global translation/rotation of the reference lidar
+    Returns:
+        dict with rotation and translation from sensor to lidar
+    """
+    sd_rec = trsc.get('sample_data', sensor_token)
+    cs_rec = trsc.get('calibrated_sensor', sd_rec['calibrated_sensor_token'])
+    pose_rec = trsc.get('ego_pose', sd_rec['ego_pose_token'])
+
+    # sensor calibration + ego pose
+    s2e_t = np.array(cs_rec['translation'])
+    s2e_r = Quaternion(cs_rec['rotation']).rotation_matrix
+    e2g_t = np.array(pose_rec['translation'])
+    e2g_r = Quaternion(pose_rec['rotation']).rotation_matrix
+
+    # reference lidar pose
+    l2e_t = np.array(ref_l2e_t)
+    l2e_r = np.array(ref_l2e_r)
+    e2g_t_ref = np.array(ref_e2g_t)
+    e2g_r_ref = np.array(ref_e2g_r)
+
+    # Compute rotation: sensor->ego(s)->global->ego(ref)->lidar(ref)
+    R = (s2e_r.T @ e2g_r.T) @ (np.linalg.inv(e2g_r_ref).T @ np.linalg.inv(l2e_r).T)
+
+    # Compute translation
+    T = (s2e_t @ e2g_r.T + e2g_t) @ (np.linalg.inv(e2g_r_ref).T @ np.linalg.inv(l2e_r).T)
+    T -= e2g_t_ref @ (np.linalg.inv(e2g_r_ref).T @ np.linalg.inv(l2e_r).T) + l2e_t @ np.linalg.inv(l2e_r).T
+
+    return dict(
+        sensor2lidar_rotation=R.T,  # for points @ R.T + T
+        sensor2lidar_translation=T
+    )
 
 
 def fill_occ_infos(trsc,
@@ -165,49 +205,87 @@ def fill_occ_infos(trsc,
             if cam_channel in sample['data']:
                 cam_token = sample['data'][cam_channel]
 
-                cam_basic_info = get_sensor_info(trsc, cam_token)
-                # Convert this camera's rotation to a Quaternion object as well
-                sensor2ego_rot_quat = Quaternion(cam_basic_info['sensor2ego_rotation'])
-                sensor2ego_trans = np.array(cam_basic_info['sensor2ego_translation'])
+                cam_info = get_sensor_info(trsc, cam_token)  # keep the basics (data_path, intrinsics, etc.)
+                s2l = get_sensor2lidar(trsc, cam_token, lidar2ego_trans, lidar2ego_rot_quat.rotation_matrix,
+                                       ego2global_trans, ego2global_rot_quat.rotation_matrix)
 
-                # 3. Perform calculations using the Quaternion objects
-                sensor2global_rot = ego2global_rot_quat * sensor2ego_rot_quat
-                sensor2global_trans = ego2global_rot_quat.rotate(sensor2ego_trans) + ego2global_trans
-                sensor2lidar_rot = lidar2ego_rot_quat.inverse * sensor2ego_rot_quat
-                sensor2lidar_trans = lidar2ego_rot_quat.inverse.rotate(sensor2ego_trans - lidar2ego_trans)
+                # sensor->global (compose ego->global with sensor->ego; use the *camera's* ego pose)
+                ego2global_rot_cam = Quaternion(cam_info['ego2global_rotation'])
+                sensor2ego_rot_cam = Quaternion(cam_info['sensor2ego_rotation'])
+                sensor2global_rot = ego2global_rot_cam * sensor2ego_rot_cam
+                sensor2global_trans = ego2global_rot_cam.rotate(
+                    np.array(cam_info['sensor2ego_translation'])
+                ) + np.array(cam_info['ego2global_translation'])
 
+                # intrinsics
                 _, _, cam_intrinsic = trsc.get_sample_data(cam_token)
 
-                # Assemble the final dictionary with the correct keys and formats
-                cam_info = {
-                    'data_path': cam_basic_info['data_path'],
+                cam_info.update({
                     'type': cam_channel,
-                    'timestamp': cam_basic_info['timestamp'],
-                    'sensor2lidar_rotation': sensor2lidar_rot.rotation_matrix,  # Convert to 3x3 matrix
-                    'sensor2lidar_translation': sensor2lidar_trans,
                     'cam_intrinsic': cam_intrinsic,
-                    'sensor2global_rotation': sensor2global_rot.rotation_matrix,  # Convert to 3x3 matrix
-                    'sensor2global_translation': sensor2global_trans
-                }
+                    'sensor2lidar_rotation': s2l['sensor2lidar_rotation'],
+                    'sensor2lidar_translation': s2l['sensor2lidar_translation'],
+                    'sensor2global_rotation': sensor2global_rot.rotation_matrix,
+                    'sensor2global_translation': sensor2global_trans,
+                })
                 info['cams'][cam_channel] = cam_info
 
-        """# Collect sweeps for the primary lidar
+        # Collect sweeps ONLY for cameras, jumping between keyframes
         sweeps = []
-        current_sweep_token = primary_lidar_token
+        # Get the token for the current keyframe (sample)
+        current_sample_token = trsc.get('sample_data', primary_lidar_token)['sample_token']
+
         while len(sweeps) < max_sweeps:
-            current_sd_rec = trsc.get('sample_data', current_sweep_token)
-            if not current_sd_rec['prev']:
+            # Get the full sample record
+            current_sample_rec = trsc.get('sample', current_sample_token)
+
+            # If there is no previous sample, break the loop
+            if not current_sample_rec['prev']:
                 break
-            prev_sweep_token = current_sd_rec['prev']
-            sweep_info = get_sensor_info(trsc, prev_sweep_token)
-            sweeps.append(sweep_info)
-            current_sweep_token = prev_sweep_token
-        info['sweeps'] = sweeps"""
+
+            # Move to the previous sample for the next iteration
+            current_sample_token = current_sample_rec['prev']
+            prev_sample_rec = trsc.get('sample', current_sample_token)
+
+            current_sweep_info = {}
+            for sensor_channel, sensor_token in prev_sample_rec['data'].items():
+                if 'CAM' in sensor_channel:
+                    sd_rec_sweep = trsc.get('sample_data', sensor_token)
+                    cs_record_sweep = trsc.get('calibrated_sensor', sd_rec_sweep['calibrated_sensor_token'])
+                    pose_record_sweep = trsc.get('ego_pose', sd_rec_sweep['ego_pose_token'])
+
+                    ego2global_rot_sweep = Quaternion(pose_record_sweep['rotation'])
+                    sensor2ego_rot_sweep = Quaternion(cs_record_sweep['rotation'])
+                    sensor2global_rot_sweep = ego2global_rot_sweep * sensor2ego_rot_sweep
+
+                    ego2global_trans_sweep = np.array(pose_record_sweep['translation'])
+                    sensor2ego_trans_sweep = np.array(cs_record_sweep['translation'])
+                    sensor2global_trans_sweep = ego2global_rot_sweep.rotate(
+                        sensor2ego_trans_sweep) + ego2global_trans_sweep
+
+                    _, _, cam_intrinsic = trsc.get_sample_data(sensor_token)
+
+                    sensor_info = {
+                        'data_path': str(trsc.get_sample_data_path(sensor_token)),
+                        'timestamp': sd_rec_sweep['timestamp'],
+                        'sensor2global_rotation': sensor2global_rot_sweep.rotation_matrix,
+                        'sensor2global_translation': sensor2global_trans_sweep,
+                        'cam_intrinsic': cam_intrinsic,
+                        'type': sensor_channel,
+                    }
+
+                    current_sweep_info[sensor_channel] = sensor_info
+
+            # Only add the sweep if it contains camera data
+            if current_sweep_info:
+                sweeps.append(current_sweep_info)
+
+        info['sweeps'] = sweeps
 
         if not test:
             sample_annotation_tokens = sample['anns']
             annotations = [trsc.get('sample_annotation', token) for token in sample_annotation_tokens]
-            _, boxes, _ = trsc.get_sample_data(primary_lidar_token, box_vis_level=1)
+            _, boxes, _ = trsc.get_sample_data(primary_lidar_token, box_vis_level=BoxVisibility.NONE)
 
             # --- Start of Changed Section ---
             # 2. Create temporary lists to hold filtered annotations
@@ -239,11 +317,13 @@ def fill_occ_infos(trsc,
                     gt_box = np.concatenate([loc, dim, [-rot - np.pi / 2]])
                     final_gt_boxes.append(gt_box)
 
-                    # Transform and keep velocity
-                    velo = np.array([*raw_velocities[i], 0.0])
-                    velo = velo @ np.linalg.inv(ego2global_rot_quat.rotation_matrix).T @ np.linalg.inv(
-                        lidar2ego_rot_quat.rotation_matrix).T
-                    final_velocity.append(velo[:2])
+                    velo_global = np.array([*raw_velocities[i], 0.0])  # (vx, vy, 0) in global
+
+                    R_e2g = ego2global_rot_quat.rotation_matrix
+                    R_l2e = lidar2ego_rot_quat.rotation_matrix
+
+                    velo_lidar = velo_global @ R_e2g @ R_l2e
+                    final_velocity.append(velo_lidar[:2])
 
                     # Keep other metadata
                     final_num_lidar_pts.append(annotations[i]['num_lidar_pts'])
