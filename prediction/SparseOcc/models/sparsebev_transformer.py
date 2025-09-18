@@ -229,7 +229,7 @@ class SparseBEVSelfAttention(BaseModule):
 
     @torch.no_grad()
     def calc_bbox_dists(self, bboxes):
-        centers = decode_bbox(bboxes, self.pc_range)[..., :2]  # [B, Q, 2]
+        """centers = decode_bbox(bboxes, self.pc_range)[..., :2]  # [B, Q, 2]
 
         dist = []
         for b in range(centers.shape[0]):
@@ -237,6 +237,61 @@ class SparseBEVSelfAttention(BaseModule):
             dist.append(dist_b[None, ...])
 
         dist = torch.cat(dist, dim=0)  # [B, Q, Q]
+        dist = -dist
+
+        return dist"""
+        return self.calc_bbox_dists_batched(bboxes, chunk_size=1024)
+
+    @torch.no_grad()
+    def calc_bbox_dists_batched(self, bboxes, chunk_size=4096):
+        """
+        Calculates pairwise distances between bounding box centers in a memory-efficient,
+        chunked manner.
+
+        Args:
+            bboxes (torch.Tensor): Tensor of bounding boxes with shape [B, Q, 10].
+            chunk_size (int): The size of chunks to process for memory efficiency.
+                              A smaller size uses less memory but may be slower.
+
+        Returns:
+            torch.Tensor: A tensor of negative pairwise distances with shape [B, Q, Q].
+        """
+        # Step 1: Simplify 3D boxes to 2D center points (x, y)
+        centers = decode_bbox(bboxes, self.pc_range)[..., :2]  # Shape: [B, Q, 2]
+        B, Q, _ = centers.shape
+
+        # Initialize a list to store the final distance matrix for each batch sample
+        dist_matrices = []
+
+        # Loop over each sample in the batch
+        for b in range(B):
+            sample_centers = centers[b]  # Shape: [Q, 2]
+            dist_chunks = []
+
+            # Step 2: Loop through the rows of the distance matrix in chunks
+            for i in range(0, Q, chunk_size):
+                # Define the end index of the current chunk
+                end = min(i + chunk_size, Q)
+
+                # Get the current chunk of centers (the "rows" of our matrix)
+                chunk = sample_centers[i:end]  # Shape: [current_chunk_size, 2]
+
+                # Calculate distances from this chunk to ALL other points in the sample.
+                # This creates a [current_chunk_size, Q] slice of the final matrix.
+                dist_chunk = torch.norm(
+                    chunk.reshape(-1, 1, 2) - sample_centers.reshape(1, -1, 2),
+                    dim=-1
+                )
+                dist_chunks.append(dist_chunk)
+
+            # Stitch all the [chunk_size, Q] slices together to form the full [Q, Q] matrix
+            dist_b = torch.cat(dist_chunks, dim=0)
+            dist_matrices.append(dist_b[None, ...])  # Add batch dimension for later concatenation
+
+        # Step 3: Combine results from all samples and prepare for attention
+        dist = torch.cat(dist_matrices, dim=0)  # Shape: [B, Q, Q]
+
+        # Negate the distances so that larger distances result in lower attention scores
         dist = -dist
 
         return dist
