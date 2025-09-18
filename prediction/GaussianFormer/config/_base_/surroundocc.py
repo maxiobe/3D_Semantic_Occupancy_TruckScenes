@@ -10,7 +10,7 @@ anno_root = "/code/prediction/GaussianFormer/data_info/trainval/"
 occ_path = "/gts/"
 
 input_shape = (704, 256)
-batch_size = 3
+batch_size = 1
 
 img_norm_cfg = dict(
     mean=[123.675, 116.28, 103.53], std=[58.395, 57.12, 57.375], to_rgb=True
