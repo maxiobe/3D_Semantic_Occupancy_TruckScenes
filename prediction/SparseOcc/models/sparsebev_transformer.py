@@ -199,7 +199,7 @@ class SparseBEVSelfAttention(BaseModule):
             nn.init.zeros_(self.gen_tau.weight)
             nn.init.uniform_(self.gen_tau.bias, 0.0, 2.0)
 
-    def build_attn_mask(self, dist, tau, chunk_size=1024):
+    def build_attn_mask(self, dist, tau, chunk_size=256):
         """
         dist: [B, Q, Q]
         tau: [B, 8, Q]
@@ -257,10 +257,10 @@ class SparseBEVSelfAttention(BaseModule):
         dist = -dist
 
         return dist"""
-        return self.calc_bbox_dists_batched(bboxes, chunk_size=1024)
+        return self.calc_bbox_dists_batched(bboxes, chunk_size=256)
 
     @torch.no_grad()
-    def calc_bbox_dists_batched(self, bboxes, chunk_size=4096):
+    def calc_bbox_dists_batched(self, bboxes, chunk_size=256):
         """
         Calculates pairwise distances between bounding box centers in a memory-efficient,
         chunked manner.
