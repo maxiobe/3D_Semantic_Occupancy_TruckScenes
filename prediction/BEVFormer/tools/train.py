@@ -238,6 +238,15 @@ def main():
         # refer to https://mmdetection3d.readthedocs.io/en/latest/tutorials/customize_runtime.html#customize-workflow  # noqa
         val_dataset.test_mode = False
         datasets.append(build_dataset(val_dataset))
+
+        from torch.utils.data import Subset
+        import numpy as np
+        max_val_fraction = 0.1  # 10% of val set
+        orig_len = len(datasets[1])
+        n_samples = max(1, int(orig_len * max_val_fraction))
+        datasets[1] = Subset(datasets[1], np.arange(n_samples))
+        print(f"⚠️ Validation limited to {n_samples}/{orig_len} samples")
+
     if cfg.checkpoint_config is not None:
         # save mmdet version, config file content and class names in
         # checkpoints as meta data
