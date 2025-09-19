@@ -215,6 +215,15 @@ class LocalAggregator(nn.Module):
                 f"and grid_size={self.grid_size}"
             )
 
+        pts = pts.contiguous()
+        points_int = points_int.int().contiguous()
+        means3D = means3D.contiguous()
+        means3D_int = means3D_int.int().contiguous()
+        opas = opas.contiguous()
+        semantics = semantics.contiguous()
+        radii = radii.int().contiguous()
+        cov3D = cov3D.contiguous()
+
         # Invoke C++/CUDA rasterization routine
         logits, bin_logits, density = _LocalAggregate.apply(
             pts,

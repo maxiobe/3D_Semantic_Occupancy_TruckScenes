@@ -143,7 +143,8 @@ class GaussianHead(BaseTaskHead):
         R = get_rotation_matrix(rotations) # b, g, 3, 3
         M = torch.matmul(S, R)
         Cov = torch.matmul(M.transpose(-1, -2), M)
-        CovInv = Cov.cpu().inverse().cuda() # b, g, 3, 3
+        #CovInv = Cov.cpu().inverse().cuda() # b, g, 3, 3
+        CovInv = torch.linalg.inv(Cov) #####
         return means, origi_opa, opacities, scales, CovInv
 
     def forward(
@@ -181,6 +182,15 @@ class GaussianHead(BaseTaskHead):
             means, origi_opa, opacities, scales, CovInv = self.prepare_gaussian_args(gaussians)
             bs, g = means.shape[:2]
 
+            #########################################
+            sampled_xyz = sampled_xyz.contiguous()
+            means = means.contiguous()
+            origi_opa = origi_opa.contiguous()
+            opacities = opacities.contiguous()
+            scales = scales.contiguous()
+            CovInv = CovInv.contiguous()
+            #######################################
+
             semantics = self.aggregator(
                 sampled_xyz.clone().float(), 
                 means, 
@@ -197,10 +207,18 @@ class GaussianHead(BaseTaskHead):
                     geosem = semantics[0]
                     
                 #prediction.append(geosem[None].transpose(1, 2))
+                #########
+                if geosem.dim() == 2:  # [N, C] or [C, N]
+                    geosem = geosem.unsqueeze(0)
+                ##########
                 prediction.append(geosem.transpose(1, 2))
                 bin_logits.append(semantics[1][None])
                 density.append(semantics[2][None])
             else:
+                ##########
+                if semantics.dim() == 2:  # [N, C] or [C, N]
+                    semantics = semantics.unsqueeze(0)
+                #########
                 #prediction.append(semantics[None].transpose(1, 2))
                 prediction.append(semantics.transpose(1, 2))
         
