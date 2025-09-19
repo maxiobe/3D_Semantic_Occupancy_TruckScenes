@@ -201,7 +201,7 @@ def CE_wo_softmax(pred, target, class_weights=None, ignore_index=255):
         # avoid log(0)
     pred = pred.clamp_min(1e-8)
     return F.nll_loss(pred.log(), target, class_weights, ignore_index=ignore_index)
-    
+
     #pred = torch.clamp(pred, 1e-6, 1. - 1e-6)
     #loss = F.nll_loss(torch.log(pred), target, class_weights, ignore_index=ignore_index)
     #return loss
