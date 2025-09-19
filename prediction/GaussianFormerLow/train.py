@@ -12,6 +12,8 @@ from mmengine.utils import symlink
 from mmseg.models import build_segmentor
 from timm.scheduler import CosineLRScheduler, MultiStepLRScheduler
 
+from torch.utils.data import Subset
+
 import warnings
 warnings.filterwarnings("ignore")
 
@@ -109,6 +111,20 @@ def main(local_rank, args):
         cfg.val_loader,
         dist=distributed,
         iter_resume=args.iter_resume)
+
+    if args.max_val_samples > 0:
+        orig_len = len(val_dataset_loader.dataset)
+
+        if args.max_val_samples < 1:  # treat as fraction
+            n_samples = int(orig_len * args.max_val_samples)
+        else:  # treat as absolute number
+            n_samples = int(min(args.max_val_samples, orig_len))
+
+        indices = np.arange(n_samples)
+        val_dataset_loader.dataset = Subset(val_dataset_loader.dataset, indices)
+
+        if local_rank == 0:
+            print(f"⚠️ Validation limited to {n_samples} samples out of {orig_len} ({n_samples / orig_len:.1%})")
 
     # get optimizer, loss, scheduler
     optimizer = build_optim_wrapper(my_model, cfg.optimizer)
@@ -369,6 +385,9 @@ if __name__ == '__main__':
     parser.add_argument('--seed', type=int, default=42)
     parser.add_argument('--gradient-accumulation', type=int, default=1)
     parser.add_argument('--dataset', type=str, default='nuscenes')
+    parser.add_argument('--max-val-samples', type=float, default=0.1,
+                        help="Limit validation samples. If >1 → number of samples, if 0<val<1 → percentage of dataset, 0 = use all")
+
     args = parser.parse_args()
     
     ngpus = torch.cuda.device_count()
