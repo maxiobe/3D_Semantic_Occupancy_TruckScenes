@@ -10,13 +10,14 @@ from .utils import custom_collate_fn_temporal
 
 from torch.utils.data.distributed import DistributedSampler
 from torch.utils.data.dataloader import DataLoader
+from torch.utils.data import Subset
 
 
 def get_dataloader(
-    train_dataset_config, 
-    val_dataset_config, 
-    train_loader, 
-    val_loader, 
+    train_dataset_config,
+    val_dataset_config,
+    train_loader,
+    val_loader,
     dist=False,
     iter_resume=False,
     train_sampler_config=dict(
@@ -26,11 +27,22 @@ def get_dataloader(
         shuffle=False,
         drop_last=False),
     val_only=False,
+    max_val_samples=0,   # 👈 add argument
 ):
     if val_only:
-        val_wrapper = OPENOCC_DATASET.build(
-            val_dataset_config)
-                
+        val_wrapper = OPENOCC_DATASET.build(val_dataset_config)
+
+        # 🔹 Apply validation subset if requested
+        if max_val_samples > 0:
+            orig_len = len(val_wrapper)
+            if max_val_samples < 1:  # fraction
+                n_samples = max(1, int(orig_len * max_val_samples))
+            else:  # absolute number
+                n_samples = int(min(max_val_samples, orig_len))
+            indices = np.arange(n_samples)
+            val_wrapper = Subset(val_wrapper, indices)
+            print(f"⚠️ Validation limited to {n_samples} samples out of {orig_len} ({n_samples/orig_len:.1%})")
+
         val_sampler = None
         if dist:
             val_sampler = DistributedSampler(val_wrapper, **val_sampler_config)
@@ -46,11 +58,21 @@ def get_dataloader(
 
         return None, val_dataset_loader
 
-    train_wrapper = OPENOCC_DATASET.build(
-        train_dataset_config)
-    val_wrapper = OPENOCC_DATASET.build(
-        val_dataset_config)
-        
+    # ---------- Training + Validation ----------
+    train_wrapper = OPENOCC_DATASET.build(train_dataset_config)
+    val_wrapper = OPENOCC_DATASET.build(val_dataset_config)
+
+    # 🔹 Apply validation subset here too
+    if max_val_samples > 0:
+        orig_len = len(val_wrapper)
+        if max_val_samples < 1:
+            n_samples = max(1, int(orig_len * max_val_samples))
+        else:
+            n_samples = int(min(max_val_samples, orig_len))
+        indices = np.arange(n_samples)
+        val_wrapper = Subset(val_wrapper, indices)
+        print(f"⚠️ Validation limited to {n_samples} samples out of {orig_len} ({n_samples/orig_len:.1%})")
+
     train_sampler = val_sampler = None
     if dist:
         if iter_resume:
