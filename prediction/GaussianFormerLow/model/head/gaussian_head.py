@@ -143,7 +143,7 @@ class GaussianHead(BaseTaskHead):
         R = get_rotation_matrix(rotations) # b, g, 3, 3
         M = torch.matmul(S, R)
         Cov = torch.matmul(M.transpose(-1, -2), M)
-        CovInv = Cov.cpu().inverse().cuda() # b, g, 3, 3
+        CovInv = Cov.float().cpu().inverse().cuda() # b, g, 3, 3
         return means, origi_opa, opacities, scales, CovInv
 
     def forward(
