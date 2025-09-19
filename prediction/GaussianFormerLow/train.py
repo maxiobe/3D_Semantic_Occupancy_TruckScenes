@@ -110,21 +110,8 @@ def main(local_rank, args):
         cfg.train_loader,
         cfg.val_loader,
         dist=distributed,
-        iter_resume=args.iter_resume)
-
-    if args.max_val_samples > 0:
-        orig_len = len(val_dataset_loader.dataset)
-
-        if args.max_val_samples < 1:  # treat as fraction
-            n_samples = int(orig_len * args.max_val_samples)
-        else:  # treat as absolute number
-            n_samples = int(min(args.max_val_samples, orig_len))
-
-        indices = np.arange(n_samples)
-        val_dataset_loader.dataset = Subset(val_dataset_loader.dataset, indices)
-
-        if local_rank == 0:
-            print(f"⚠️ Validation limited to {n_samples} samples out of {orig_len} ({n_samples / orig_len:.1%})")
+        iter_resume=args.iter_resume,
+        max_val_samples=args.max_val_samples)
 
     # get optimizer, loss, scheduler
     optimizer = build_optim_wrapper(my_model, cfg.optimizer)
