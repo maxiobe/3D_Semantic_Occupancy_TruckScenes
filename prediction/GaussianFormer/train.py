@@ -212,6 +212,14 @@ def main(local_rank, args):
                 # forward + backward + optimize
                 result_dict = my_model(imgs=input_imgs, metas=data, global_iter=global_iter)
 
+                ###############################################################
+                for key, value in result_dict.items():
+                    if isinstance(value, torch.Tensor) and torch.isnan(value).any():
+                        logger.error(f"!!! NaN detected in model output: result_dict['{key}'] !!!")
+                        # Consider adding exit() here to stop on first detection
+                        # exit()
+                ################################################################
+
                 loss_input = {
                     'metas': data,
                     'global_iter': global_iter
@@ -221,6 +229,17 @@ def main(local_rank, args):
                         loss_input_key: result_dict[loss_input_val]})
                 loss, loss_dict = loss_func(loss_input)
                 loss = loss / grad_accumulation
+
+            # -------------> ADD THIS BLOCK <-------------
+            # Check the final loss value before backward pass
+            if torch.isnan(loss) or torch.isinf(loss):
+                logger.error(f"!!! Invalid loss detected (NaN or Inf): {loss.item()}. Halting. !!!")
+                # Dumping tensors for debugging
+                # torch.save(result_dict, osp.join(args.work_dir, "nan_debug_result_dict.pth"))
+                # torch.save(loss_input, osp.join(args.work_dir, "nan_debug_loss_input.pth"))
+                exit()
+            # ----------------------------------------------
+
             if not amp:
                 loss.backward()
                 if (global_iter + 1) % grad_accumulation == 0:
@@ -228,6 +247,13 @@ def main(local_rank, args):
                     optimizer.step()
                     optimizer.zero_grad()
             else:
+                # -------------> ADD THIS BLOCK <-------------
+                # Check the final loss value before backward pass (AMP version)
+                if torch.isnan(loss) or torch.isinf(loss):
+                    logger.error(f"!!! Invalid loss detected (NaN or Inf) in AMP: {loss.item()}. Halting. !!!")
+                    exit()
+                # ----------------------------------------------
+
                 scaler.scale(loss).backward()
                 if (global_iter + 1) % grad_accumulation == 0:
                     scaler.unscale_(optimizer)
