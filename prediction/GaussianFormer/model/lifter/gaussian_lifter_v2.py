@@ -28,8 +28,9 @@ class GaussianLifterV2(BaseLifter):
         scale_activation="sigmoid",
 
         num_samples=64,
-        pc_range=[-50, -50, -5, 50, 50, 3],
-        voxel_size=0.5,
+        #pc_range=[-50, -50, -5, 50, 50, 3],
+        pc_range=[-75, -75, -2, 75, 75, 10.8],
+        voxel_size=0.2,#0.5
         #occ_resolution=[200, 200, 16],
         occ_resolution=[750, 750, 64],
         empty_label=16,
