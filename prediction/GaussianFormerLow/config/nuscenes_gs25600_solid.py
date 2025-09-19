@@ -205,3 +205,5 @@ model = dict(
             grid_size=grid_size,),
     )
 )
+
+amp = True # Added
