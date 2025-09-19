@@ -245,8 +245,8 @@ model = dict(
             scale=[100, 100, 8.0],
         ),
         #with_empty=False,
-        with_empty=True,
-        use_localaggprob=False,
+        with_empty=False,
+        use_localaggprob=True,
         use_localaggprob_fast=True,
         combine_geosem=True,
         cuda_kwargs=dict(
