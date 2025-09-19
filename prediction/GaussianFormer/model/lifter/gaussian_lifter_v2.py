@@ -240,16 +240,23 @@ class GaussianLifterV2(BaseLifter):
                 # breakpoint()
                 if kwargs.get("benchmarking", False):
                     scan = scan[np.random.permutation(scan.shape[0])]
+                    scan = scan.contiguous() # Added
                     num_subsets = 3
                     sublens = torch.linspace(0, scan.shape[0], num_subsets + 1, dtype=torch.int, device=scan.device)[1:]
                     new_sublens = torch.linspace(0, self.num_anchor, num_subsets + 1, dtype=torch.int, device=scan.device)[1:]
                     scanidx = farthest_point_sampling(scan, sublens, new_sublens)
+
+                    scanidx = scanidx.long() # Added
                 else:
+                    scan = scan.contiguous() # Added
                     # breakpoint()
                     scanidx = farthest_point_sampling(
                         scan, 
-                        torch.tensor([scan.shape[0]], device=scan.device, dtype=torch.int),
-                        torch.tensor([self.num_anchor], device=scan.device, dtype=torch.int))
+                        torch.tensor([scan.shape[0]], device=scan.device, dtype=torch.int32),
+                        torch.tensor([self.num_anchor], device=scan.device, dtype=torch.int32))
+
+                    scanidx = scanidx.long() # Added
+
                 scan = scan[scanidx, :]
             
             anchor_xyz.append(scan)
