@@ -147,7 +147,7 @@ class _LocalAggregate(torch.autograd.Function):
         return grads
 
 class LocalAggregator(nn.Module):
-    def __init__(self, scale_multiplier, H, W, D, pc_min, grid_size, radii_min=1):
+    def __init__(self, scale_multiplier, H, W, D, pc_min, grid_size, radii_min=1, radii_max=18): # added max
         super().__init__()
         self.scale_multiplier = scale_multiplier
         self.H = H
@@ -156,6 +156,7 @@ class LocalAggregator(nn.Module):
         self.register_buffer('pc_min', torch.tensor(pc_min, dtype=torch.float).unsqueeze(0))
         self.grid_size = grid_size
         self.radii_min = radii_min
+        self.radii_max = radii_max
 
     def forward(
         self, 
@@ -180,7 +181,7 @@ class LocalAggregator(nn.Module):
         means3D_int = ((means3D.detach() - self.pc_min) / self.grid_size).to(torch.int)
         assert means3D_int.min() >= 0 and means3D_int[:, 0].max() < self.H and means3D_int[:, 1].max() < self.W and means3D_int[:, 2].max() < self.D
         radii = torch.ceil(scales.max(dim=-1)[0] * self.scale_multiplier / self.grid_size).to(torch.int)
-        radii = radii.clamp(min=self.radii_min)
+        radii = radii.clamp(min=self.radii_min, max=self.radii_max) # added max
         assert radii.min() >= 1
         cov3D = cov3D.flatten(1)[:, [0, 4, 8, 1, 5, 2]]
 
