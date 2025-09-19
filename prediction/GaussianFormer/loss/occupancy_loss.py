@@ -193,9 +193,18 @@ def CE_ssc_loss(pred, target, class_weights=None, ignore_index=255):
     return loss
 
 def CE_wo_softmax(pred, target, class_weights=None, ignore_index=255):
-    pred = torch.clamp(pred, 1e-6, 1. - 1e-6)
-    loss = F.nll_loss(torch.log(pred), target, class_weights, ignore_index=ignore_index)
-    return loss
+    if target.dtype != torch.long:
+        target = target.long()
+    if class_weights is not None:
+        class_weights = class_weights.to(dtype=pred.dtype, device=pred.device)
+
+        # avoid log(0)
+    pred = pred.clamp_min(1e-8)
+    return F.nll_loss(pred.log(), target, class_weights, ignore_index=ignore_index)
+    
+    #pred = torch.clamp(pred, 1e-6, 1. - 1e-6)
+    #loss = F.nll_loss(torch.log(pred), target, class_weights, ignore_index=ignore_index)
+    #return loss
 
 def sem_scal_loss(pred, ssc_target, ignore_index=255):
     # Get softmax probabilities
