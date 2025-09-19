@@ -14,6 +14,23 @@ import torch
 import torch.nn.functional as F
 from . import _C
 
+#########
+import os
+
+AGG_DEBUG = os.getenv("AGG_DEBUG", "0") == "1"
+
+def _tinfo(name, x):
+    if torch.is_tensor(x):
+        s = f"{name}: shape={tuple(x.shape)}, dtype={x.dtype}, device={x.device}"
+        try:
+            with torch.no_grad():
+                s += f", min={x.min().item():.4g}, max={x.max().item():.4g}"
+        except Exception:
+            pass
+        return s
+    return f"{name}: {x}"
+#########
+
 
 class _LocalAggregate(torch.autograd.Function):
     @staticmethod
@@ -42,6 +59,20 @@ class _LocalAggregate(torch.autograd.Function):
             cov3D,
             H, W, D
         )
+
+        if AGG_DEBUG:
+            print("\n[AGG_DEBUG] _LocalAggregate.forward inputs:")
+            for name, x in [
+                ("pts", pts), ("points_int", points_int),
+                ("means3D", means3D), ("means3D_int", means3D_int),
+                ("opas", opas), ("semantics", semantics),
+                ("radii", radii), ("cov3D", cov3D)
+            ]:
+                print(_tinfo(name, x))
+            print(f"H={H}, W={W}, D={D}")
+            # basic consistency
+            assert means3D.shape[0] == cov3D.shape[0], "means3D and cov3D count mismatch"
+
         # Invoke C++/CUDA rasterizer
         num_rendered, logits, bin_logits, density, probability, geomBuffer, binningBuffer, imgBuffer = _C.local_aggregate(*args) # todo
         
@@ -152,6 +183,36 @@ class LocalAggregator(nn.Module):
         radii = radii.clamp(min=self.radii_min)
         assert radii.min() >= 1
         cov3D = cov3D.flatten(1)[:, [0, 4, 8, 1, 5, 2]]
+
+        if AGG_DEBUG:
+            print("\n[AGG_DEBUG] LocalAggregator inputs (pre kernel):")
+            print(_tinfo("pts", pts))
+            print(_tinfo("means3D", means3D))
+            print(_tinfo("opas", opas))
+            print(_tinfo("semantics", semantics))
+            print(_tinfo("scales(detached)", scales))
+            print(_tinfo("cov3D(flat6)", cov3D))
+            print(_tinfo("points_int", points_int))
+            print(_tinfo("means3D_int", means3D_int))
+            print(_tinfo("radii", radii))
+            print(_tinfo("pc_min", self.pc_min))
+            print(f"H={self.H}, W={self.W}, D={self.D}, grid_size={self.grid_size}, "
+                  f"scale_multiplier={self.scale_multiplier}, radii_min={self.radii_min}")
+
+        # sanity checks (fail fast with context)
+        assert self.grid_size > 0, "grid_size must be > 0"
+        assert self.scale_multiplier > 0, "scale_multiplier must be > 0"
+        assert pts.ndim == 2 and pts.size(-1) == 3, f"pts should be [N,3], got {pts.shape}"
+        assert means3D.ndim == 2 and means3D.size(-1) == 3, f"means3D should be [M,3], got {means3D.shape}"
+        assert cov3D.ndim == 2 and cov3D.size(-1) == 6, f"cov3D should be [M,6], got {cov3D.shape}"
+
+        # heuristic guard: extreme radii will explode buffer sizes
+        rmax = int(radii.max().item())
+        if rmax > 1024:
+            raise RuntimeError(
+                f"radii.max()={rmax} is suspiciously large; check scale_multiplier={self.scale_multiplier} "
+                f"and grid_size={self.grid_size}"
+            )
 
         # Invoke C++/CUDA rasterization routine
         logits, bin_logits, density = _LocalAggregate.apply(
