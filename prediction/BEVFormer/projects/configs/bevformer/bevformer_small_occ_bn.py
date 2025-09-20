@@ -43,6 +43,9 @@ bev_h_ = 750
 #bev_w_ = 1500
 bev_w_ = 750
 queue_length = 4 # each sequence contains `queue_length` frames.
+
+norm_cfg = dict(type='SyncBN', requires_grad=True)
+
 model = dict(
     type='BEVFormerOcc',
     use_grid_mask=True,
@@ -53,7 +56,8 @@ model = dict(
         num_stages=4,
         out_indices=(2, 3),
         frozen_stages=1,
-        norm_cfg=dict(type='BN2d', requires_grad=False),
+        #norm_cfg=dict(type='BN2d', requires_grad=False),
+        norm_cfg=norm_cfg, # Changed
         norm_eval=True,
         style='caffe',
         dcn=dict(type='DCNv2', deform_groups=1, fallback_on_stride=False), # original DCNv2 will print log when perform load_state_dict
@@ -65,7 +69,8 @@ model = dict(
         start_level=0,
         add_extra_convs='on_output',
         num_outs=_num_levels_,
-        relu_before_extra_convs=True),
+        relu_before_extra_convs=True,
+        norm_cfg=norm_cfg), # Added
     pts_bbox_head=dict(
         type='BEVFormerOccHead',
         pc_range=point_cloud_range,
@@ -94,8 +99,10 @@ model = dict(
             pillar_h=64,
             num_classes=17,
             num_cams=4,
-            norm_cfg=dict(type='BN', ),
-            norm_cfg_3d=dict(type='BN3d', ),
+            norm_cfg=norm_cfg,
+            #norm_cfg=dict(type='BN', ),
+            norm_cfg_3d=norm_cfg,
+            #norm_cfg_3d=dict(type='BN3d', ),
             use_3d=True,
             use_conv=False,
             rotate_prev_bev=True,
@@ -253,7 +260,7 @@ lr_config = dict(
     min_lr_ratio=1e-3)
 total_epochs = 24
 evaluation = dict(
-    interval=10,
+    interval=5,
     pipeline=test_pipeline,
     save_best='mIoU', # added
     rule='greater' # added
