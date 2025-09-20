@@ -116,7 +116,7 @@ class _LocalAggregate(torch.autograd.Function):
         return grads
 
 class LocalAggregator(nn.Module):
-    def __init__(self, scale_multiplier, H, W, D, pc_min, grid_size, radii_min=1):
+    def __init__(self, scale_multiplier, H, W, D, pc_min, grid_size, radii_min=1, radii_max=18):
         super().__init__()
         self.scale_multiplier = scale_multiplier
         self.H = H
@@ -125,6 +125,7 @@ class LocalAggregator(nn.Module):
         self.register_buffer('pc_min', torch.tensor(pc_min, dtype=torch.float).unsqueeze(0))
         self.grid_size = grid_size
         self.radii_min = radii_min
+        self.radii_max = radii_max ## Added
 
     def forward(
         self, 
@@ -149,9 +150,20 @@ class LocalAggregator(nn.Module):
         means3D_int = ((means3D.detach() - self.pc_min) / self.grid_size).to(torch.int)
         assert means3D_int.min() >= 0 and means3D_int[:, 0].max() < self.H and means3D_int[:, 1].max() < self.W and means3D_int[:, 2].max() < self.D
         radii = torch.ceil(scales * self.scale_multiplier / self.grid_size).to(torch.int)
-        radii = radii.clamp(min=self.radii_min)
+        radii = radii.clamp(min=self.radii_min, max=self.radii_max)
         assert radii.min() >= 1
         cov3D = cov3D.flatten(1)[:, [0, 4, 8, 1, 5, 2]]
+
+        ###########
+        pts = pts.contiguous()
+        points_int = points_int.int().contiguous()
+        means3D = means3D.contiguous()
+        means3D_int = means3D_int.int().contiguous()
+        opas = opas.contiguous()
+        semantics = semantics.contiguous()
+        radii = radii.int().contiguous()
+        cov3D = cov3D.contiguous()
+        #############
 
         # Invoke C++/CUDA rasterization routine
         logits, bin_logits, density = _LocalAggregate.apply(
