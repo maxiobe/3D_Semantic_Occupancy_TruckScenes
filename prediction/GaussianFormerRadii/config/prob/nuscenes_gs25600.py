@@ -178,6 +178,7 @@ model = dict(
         deformable_model=dict(
             embed_dims=embed_dims,
             residual_mode="none",
+            num_cams=4,
             kps_generator=dict(
                 embed_dims=embed_dims,
                 phi_activation=phi_activation,
