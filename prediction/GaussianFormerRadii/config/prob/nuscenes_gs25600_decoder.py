@@ -88,7 +88,7 @@ loss_input_convertion = dict(
 )
 # ========= model config ===============
 embed_dims = 128
-num_decoder = 4
+num_decoder = 6
 #pc_range = [-50.0, -50.0, -5.0, 50.0, 50.0, 3.0]
 pc_range = [-75.0, -75.0, -2.0, 75.0, 75.0, 10.8]
 scale_range = [0.01, 1.8]
@@ -96,7 +96,7 @@ xyz_coordinate = 'cartesian'
 phi_activation = 'sigmoid'
 include_opa = True
 #load_from = 'ckpts/r101_dcn_fcos3d_pretrain.pth'
-load_from = '/code/prediction/GaussianFormer/ckpts/r101_dcn_fcos3d_pretrain.pth'
+load_from = '/code/prediction/GaussianFormerRadii/ckpts/r101_dcn_fcos3d_pretrain.pth'
 semantics = True
 semantic_dim = 16
 #semantic_dim = 17
