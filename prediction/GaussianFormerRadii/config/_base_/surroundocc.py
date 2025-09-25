@@ -5,7 +5,7 @@ data_root = "/truckscenes/"
 #anno_root = "data/nuscenes_cam/"
 #anno_root = "/home/max/ssd/Masterarbeit/TruckScenes/mini/v1.0-mini/"
 #anno_root = "/code/prediction/GaussianFormer/data_info/mini/"
-anno_root = "/code/prediction/GaussianFormer/data_info/trainval/"
+anno_root = "/code/prediction/GaussianFormerRadii/data_info/trainval/"
 #occ_path = "/home/max/ssd/Masterarbeit/TruckScenes/mini/v1.0-mini/gts/"
 occ_path = "/gts/"
 

@@ -77,7 +77,8 @@ scale_range = [0.08, 0.32]
 xyz_coordinate = 'cartesian'
 phi_activation = 'sigmoid'
 include_opa = False
-load_from = 'ckpts/r101_dcn_fcos3d_pretrain.pth'
+#load_from = 'ckpts/r101_dcn_fcos3d_pretrain.pth'
+load_from = '/code/prediction/GaussianFormerRadii/ckpts/r101_dcn_fcos3d_pretrain.pth'
 semantics = True
 semantic_dim = 18
 
