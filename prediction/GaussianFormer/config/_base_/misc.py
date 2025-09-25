@@ -1,7 +1,7 @@
 print_freq = 10
 work_dir = None
 load_from = None
-max_epochs = 20
+max_epochs = 30
 
 # ================== training ========================
 optimizer = dict(
