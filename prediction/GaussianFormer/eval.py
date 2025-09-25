@@ -95,6 +95,8 @@ def main(local_rank, args):
     
     # resume and load
     cfg.resume_from = ''
+    logger.info(f'resume from {cfg.resume_from}')
+
     if osp.exists(osp.join(args.work_dir, 'latest.pth')):
         cfg.resume_from = osp.join(args.work_dir, 'latest.pth')
     if args.resume_from:
