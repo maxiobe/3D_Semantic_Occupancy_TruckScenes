@@ -95,7 +95,6 @@ def main(local_rank, args):
     
     # resume and load
     cfg.resume_from = ''
-    logger.info(f'resume from {cfg.resume_from}')
 
     if osp.exists(osp.join(args.work_dir, 'latest.pth')):
         cfg.resume_from = osp.join(args.work_dir, 'latest.pth')
@@ -113,15 +112,19 @@ def main(local_rank, args):
 
         # Load with strict=True. This will raise an error if keys don't match.
         missing_keys, unexpected_keys = raw_model.load_state_dict(state_dict, strict=False) # New
+        logger.info(f'missing keys: {missing_keys}')
         print(f"Missing keys: {missing_keys}") # New
+        logger.info(f"Unexpected keys: {unexpected_keys}") # New
         print(f"Unexpected keys: {unexpected_keys}") # New
 
         print(f'Successfully loaded checkpoint from {cfg.resume_from}') # New
+        logger.info(f'Successfully loaded checkpoint from {cfg.resume_from}')
 
         #raw_model.load_state_dict(ckpt.get("state_dict", ckpt), strict=True)
         #print(f'successfully resumed.')
     else:
         # If no checkpoint is found, it's better to stop than to evaluate a random model.
+        logger.info(f'No checkpoint found at {cfg.resume_from}')
         raise FileNotFoundError(f"No checkpoint found at {cfg.resume_from} or in work_dir.")
     """elif cfg.load_from:
         ckpt = torch.load(cfg.load_from, map_location='cpu')
@@ -195,8 +198,8 @@ def main(local_rank, args):
                     miou_metric._after_step(pred_occ, gt_occ, occ_mask)
                     # breakpoint()
             
-            #if i_iter_val % print_freq == 0 and local_rank == 0:
-             #   logger.info('[EVAL] Iter %5d'%(i_iter_val))
+            if i_iter_val % print_freq == 0 and local_rank == 0:
+                logger.info('[EVAL] Iter %5d'%(i_iter_val))
                     
     miou, iou2 = miou_metric._after_epoch()
     logger.info(f'mIoU: {miou}, iou2: {iou2}')
