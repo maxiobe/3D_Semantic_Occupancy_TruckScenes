@@ -39,8 +39,8 @@ loss = dict(
         dict(
             type='OccupancyLoss',
             weight=1.0,
-            empty_label=17,
-            num_classes=18,
+            empty_label=16,
+            num_classes=17,
             use_focal_loss=False,
             use_dice_loss=False,
             balance_cls_weight=True,
@@ -49,11 +49,13 @@ loss = dict(
                 loss_voxel_lovasz_weight=1.0),
             use_sem_geo_scal_loss=False,
             use_lovasz_loss=True,
-            lovasz_ignore=17,
-            manual_class_weight=[
-                1.01552756, 1.06897009, 1.30013094, 1.07253735, 0.94637502, 1.10087012,
-                1.26960524, 1.06258364, 1.189019,   1.06217292, 1.00595144, 0.85706115,
-                1.03923299, 0.90867526, 0.8936431,  0.85486129, 0.8527829,  0.5       ],
+            lovasz_ignore=16,
+            #manual_class_weight=[
+             #   1.01552756, 1.06897009, 1.30013094, 1.07253735, 0.94637502, 1.10087012,
+              #  1.26960524, 1.06258364, 1.189019,   1.06217292, 1.00595144, 0.85706115,
+               # 1.03923299, 0.90867526, 0.8936431,  0.85486129, 0.8527829,  0.5       ],
+            manual_class_weight=[1.1339, 1.2342, 1.2269, 0.9952, 0.8234, 1.0237, 1.2327, 1.1060, 1.1085,
+                             0.8140, 0.8459, 1.4710, 0.8945, 0.9810, 0.8676, 0.6794, 0.5621],
             ignore_empty=False,
             lovasz_use_softmax=False),
         dict(
@@ -84,14 +86,16 @@ loss_input_convertion = dict(
 # ========= model config ===============
 embed_dims = 128
 num_decoder = 4
-pc_range = [-50.0, -50.0, -5.0, 50.0, 50.0, 3.0]
+#pc_range = [-50.0, -50.0, -5.0, 50.0, 50.0, 3.0]
+pc_range = [-75.0, -75.0, -2.0, 75.0, 75.0, 10.8]
 scale_range = [0.01, 2.5]
 xyz_coordinate = 'cartesian'
 phi_activation = 'sigmoid'
 include_opa = True
-load_from = 'ckpts/r101_dcn_fcos3d_pretrain.pth'
+#load_from = 'ckpts/r101_dcn_fcos3d_pretrain.pth'
+load_from = '/code/prediction/GaussianFormer/ckpts/r101_dcn_fcos3d_pretrain.pth'
 semantics = True
-semantic_dim = 17
+semantic_dim = 16
 
 model = dict(
     freeze_lifter=True,
@@ -198,7 +202,8 @@ model = dict(
             in_channels=embed_dims,
             embed_channels=embed_dims,
             pc_range=pc_range,
-            grid_size=[1.0, 1.0, 1.0],
+            #grid_size=[1.0, 1.0, 1.0],
+            grid_size=[0.2, 0.2, 0.2],
             phi_activation=phi_activation,
             xyz_coordinate=xyz_coordinate,
             use_out_proj=True,
@@ -245,8 +250,11 @@ model = dict(
         cuda_kwargs=dict(
             _delete_=True,
             scale_multiplier=5,
-            H=200, W=200, D=16,
-            pc_min=[-50.0, -50.0, -5.0],
-            grid_size=0.5),
+            #H=200, W=200, D=16,
+            H=750, W=750, D=64,
+            #pc_min=[-50.0, -50.0, -5.0],
+            pc_min=[-75.0, -75.0, -2.0],
+            #grid_size=0.5),
+            grid_size=0.2),
     )
 )

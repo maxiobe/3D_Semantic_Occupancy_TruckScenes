@@ -40,9 +40,7 @@ loss = dict(
             type='OccupancyLoss',
             weight=1.0,
             empty_label=16,
-            #empty_label=17,
             num_classes=17,
-            #num_classes=18,
             use_focal_loss=False,
             use_dice_loss=False,
             balance_cls_weight=True,
@@ -52,7 +50,6 @@ loss = dict(
             use_sem_geo_scal_loss=False,
             use_lovasz_loss=True,
             lovasz_ignore=16,
-            #lovaxz_ignore=17,
             #manual_class_weight=[
              #   1.01552756, 1.06897009, 1.30013094, 1.07253735, 0.94637502, 1.10087012,
               #  1.26960524, 1.06258364, 1.189019,   1.06217292, 1.00595144, 0.85706115,
@@ -88,10 +85,11 @@ loss_input_convertion = dict(
 )
 # ========= model config ===============
 embed_dims = 128
-num_decoder = 4
+#num_decoder = 4
+num_decoder = 6
 #pc_range = [-50.0, -50.0, -5.0, 50.0, 50.0, 3.0]
 pc_range = [-75.0, -75.0, -2.0, 75.0, 75.0, 10.8]
-scale_range = [0.01, 1.8]
+scale_range = [0.01, 3.2]
 xyz_coordinate = 'cartesian'
 phi_activation = 'sigmoid'
 include_opa = True
@@ -99,7 +97,6 @@ include_opa = True
 load_from = '/code/prediction/GaussianFormer/ckpts/r101_dcn_fcos3d_pretrain.pth'
 semantics = True
 semantic_dim = 16
-#semantic_dim = 17
 
 model = dict(
     freeze_lifter=True,
@@ -121,7 +118,7 @@ model = dict(
         start_level=1),
     lifter=dict(
         type='GaussianLifterV2',
-        num_anchor=19200,
+        num_anchor=6400,
         embed_dims=embed_dims,
         anchor_grad=False,
         feat_grad=False,
@@ -155,7 +152,7 @@ model = dict(
         initializer_img_downsample=None,
         pretrained_path="out/prob/init/init.pth",
         deterministic=False,
-        random_samples=6400),
+        random_samples=4800),
     encoder=dict(
         type='GaussianOccEncoder',
         anchor_encoder=dict(
@@ -177,6 +174,7 @@ model = dict(
         ),
         deformable_model=dict(
             embed_dims=embed_dims,
+            num_cams=4,
             residual_mode="none",
             kps_generator=dict(
                 embed_dims=embed_dims,
@@ -247,6 +245,7 @@ model = dict(
             mean=[0, 0, -1.0],
             scale=[100, 100, 8.0],
         ),
+        #with_empty=False,
         with_empty=False,
         use_localaggprob=True,
         use_localaggprob_fast=False,
@@ -254,11 +253,8 @@ model = dict(
         cuda_kwargs=dict(
             _delete_=True,
             scale_multiplier=4,
-            #H=200, W=200, D=16,
             H=750, W=750, D=64,
-            #pc_min=[-50.0, -50.0, -5.0],
             pc_min=[-75.0, -75.0, -2.0],
-            #grid_size=0.5),
             grid_size=0.2),
     )
 )
