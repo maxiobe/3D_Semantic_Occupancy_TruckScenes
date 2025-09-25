@@ -1,7 +1,7 @@
-# try:
-#     from vis import save_occ
-# except:
-#     print('Load Occupancy Visualization Tools Failed.')
+try:
+    from vis import save_occ
+except:
+    print('Load Occupancy Visualization Tools Failed.')
 import time, argparse, os.path as osp, os
 import torch, numpy as np
 import torch.distributed as dist
@@ -158,18 +158,18 @@ def main(local_rank, args):
                     pred_occ = pred
                     gt_occ = result_dict['sampled_label'][idx]
                     occ_mask = result_dict['occ_mask'][idx].flatten()
-                    # if args.vis_occ:
-                    #     os.makedirs(os.path.join(args.work_dir, 'vis'), exist_ok=True)
-                    #     save_occ(
-                    #         os.path.join(args.work_dir, 'vis'),
-                    #         pred_occ.reshape(1, 200, 200, 16),
-                    #         f'val_{i_iter_val}_pred',
-                    #         True, 0)
-                    #     save_occ(
-                    #         os.path.join(args.work_dir, 'vis'),
-                    #         gt_occ.reshape(1, 200, 200, 16),
-                    #         f'val_{i_iter_val}_gt',
-                    #         True, 0)
+                    if args.vis_occ:
+                        os.makedirs(os.path.join(args.work_dir, 'vis'), exist_ok=True)
+                        save_occ(
+                            os.path.join(args.work_dir, 'vis'),
+                            pred_occ.reshape(1, 750, 750, 64),
+                            f'val_{i_iter_val}_pred',
+                            True, 0)
+                        save_occ(
+                            os.path.join(args.work_dir, 'vis'),
+                            gt_occ.reshape(1, 750, 750, 64),
+                            f'val_{i_iter_val}_gt',
+                            True, 0)
                     miou_metric._after_step(pred_occ, gt_occ, occ_mask)
                     # breakpoint()
             
