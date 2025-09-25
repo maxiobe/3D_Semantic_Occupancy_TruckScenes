@@ -106,9 +106,22 @@ def main(local_rank, args):
     if cfg.resume_from and osp.exists(cfg.resume_from):
         map_location = 'cpu'
         ckpt = torch.load(cfg.resume_from, map_location=map_location)
-        raw_model.load_state_dict(ckpt.get("state_dict", ckpt), strict=True)
-        print(f'successfully resumed.')
-    elif cfg.load_from:
+
+        state_dict = ckpt.get("state_dict", ckpt) # New
+
+        # Load with strict=True. This will raise an error if keys don't match.
+        missing_keys, unexpected_keys = raw_model.load_state_dict(state_dict, strict=False) # New
+        print(f"Missing keys: {missing_keys}") # New
+        print(f"Unexpected keys: {unexpected_keys}") # New
+
+        print(f'Successfully loaded checkpoint from {cfg.resume_from}') # New
+
+        #raw_model.load_state_dict(ckpt.get("state_dict", ckpt), strict=True)
+        #print(f'successfully resumed.')
+    else:
+        # If no checkpoint is found, it's better to stop than to evaluate a random model.
+        raise FileNotFoundError(f"No checkpoint found at {cfg.resume_from} or in work_dir.")
+    """elif cfg.load_from:
         ckpt = torch.load(cfg.load_from, map_location='cpu')
         if 'state_dict' in ckpt:
             state_dict = ckpt['state_dict']
@@ -119,7 +132,7 @@ def main(local_rank, args):
         except:
             from misc.checkpoint_util import refine_load_from_sd
             print(raw_model.load_state_dict(
-                refine_load_from_sd(state_dict), strict=False))
+                refine_load_from_sd(state_dict), strict=False))"""
         
     print_freq = cfg.print_freq
     from misc.metric_util import MeanIoU
@@ -145,6 +158,8 @@ def main(local_rank, args):
     my_model.eval()
     os.environ['eval'] = 'true'
 
+    amp = cfg.get('amp', False)
+
     with torch.no_grad():
         for i_iter_val, data in enumerate(tqdm(val_dataset_loader, desc="[EVAL]")):
             
@@ -152,7 +167,12 @@ def main(local_rank, args):
                 if isinstance(data[k], torch.Tensor):
                     data[k] = data[k].cuda()
             input_imgs = data.pop('img')
-            result_dict = my_model(imgs=input_imgs, metas=data)
+
+            #result_dict = my_model(imgs=input_imgs, metas=data)
+
+            with torch.cuda.amp.autocast(enabled=amp):
+                result_dict = my_model(imgs=input_imgs, metas=data)
+
             if 'final_occ' in result_dict:
                 for idx, pred in enumerate(result_dict['final_occ']):
                     pred_occ = pred
