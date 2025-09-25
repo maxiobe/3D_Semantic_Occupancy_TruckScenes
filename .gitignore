@@ -222,5 +222,13 @@ prediction/GaussianFormer/ckpts
 prediction/GaussianFormer/out
 prediction/GaussianFormer/data_info
 
+prediction/GaussianFormerLow/ckpts
+prediction/GaussianFormerLow/out
+prediction/GaussianFormerLow/data_info
+
+prediction/GaussianFormerRadii/ckpts
+prediction/GaussianFormerRadii/out
+prediction/GaussianFormerRadii/data_info
+
 prediction/SparseOcc/data_info
 prediction/SparseOcc/pretrain
