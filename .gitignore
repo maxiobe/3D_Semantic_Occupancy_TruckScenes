@@ -230,5 +230,9 @@ prediction/GaussianFormerRadii/ckpts
 prediction/GaussianFormerRadii/out
 prediction/GaussianFormerRadii/data_info
 
+prediction/GaussianFormerOne/ckpts
+prediction/GaussianFormerOne/out
+prediction/GaussianFormerOne/data_info
+
 prediction/SparseOcc/data_info
 prediction/SparseOcc/pretrain
