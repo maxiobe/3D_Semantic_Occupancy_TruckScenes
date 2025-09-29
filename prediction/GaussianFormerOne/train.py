@@ -319,14 +319,14 @@ def main(local_rank, args):
                     logger.info(f"--- Saving prediction at epoch {epoch} ---")
 
                     # Get prediction and ground truth
-                    pred_logits = result_dict['final_occ'][0]  # Batch size is 1
+                    pred_labels = result_dict['final_occ'][0]  # Batch size is 1
                     gt_labels = result_dict['sampled_label'][0]
 
-                    print(f"pred_logits shape: {pred_logits.shape}")
+                    print(f"pred_logits shape: {pred_labels.shape}")
 
                     # Convert to NumPy arrays for saving
-                    pred_labels_np = pred_logits.argmax(0).detach().cpu().numpy().astype(np.uint8)
                     gt_labels_np = gt_labels.detach().cpu().numpy().astype(np.uint8)
+                    pred_labels_np = pred_labels.detach().cpu().numpy().astype(np.uint8)
 
                     # Define a unique filename
                     filename = osp.join(save_dir, f'epoch_{epoch:04d}.npz')
