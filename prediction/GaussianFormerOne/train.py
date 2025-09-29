@@ -67,6 +67,7 @@ def main(local_rank, args):
     
     if local_rank == 0:
         os.makedirs(args.work_dir, exist_ok=True)
+        os.makedirs(osp.join(args.work_dir, "predictions"), exist_ok=True)
         cfg.dump(osp.join(args.work_dir, osp.basename(args.py_config)))
         from misc.tb_wrapper import WrappedTBWriter
         writer = WrappedTBWriter('selfocc', log_dir=osp.join(args.work_dir, 'tf'))
@@ -207,6 +208,8 @@ def main(local_rank, args):
          True, 17, filter_minmax=False)
     miou_metric.reset()
 
+    save_dir = osp.join(args.work_dir, "predictions")
+
     while epoch < max_num_epochs:
         my_model.train()
         my_model.apply(freeze_bn)
@@ -220,6 +223,9 @@ def main(local_rank, args):
         for i_iter, data in enumerate(train_dataset_loader):
             if first_run:
                 i_iter = i_iter + last_iter
+
+            # Create a deepcopy of data for saving logic later, to preserve original tensors
+            data_for_saving = deepcopy(data)
 
             for k in list(data.keys()):
                 if isinstance(data[k], torch.Tensor):
@@ -306,6 +312,29 @@ def main(local_rank, args):
                 loss_list = []
             data_time_s = time.time()
             time_s = time.time()
+
+            # Save every 500 epochs or on the very last epoch
+            if (epoch % 200 == 0) or (epoch == max_num_epochs - 1):
+                if local_rank == 0:  # Only save on the main process
+                    logger.info(f"--- Saving prediction at epoch {epoch} ---")
+
+                    # Get prediction and ground truth
+                    pred_logits = result_dict['final_occ'][0]  # Batch size is 1
+                    gt_labels = data_for_saving['sampled_label'][0]  # Use the deepcopied data
+
+                    # Convert to NumPy arrays for saving
+                    pred_labels_np = pred_logits.argmax(0).detach().cpu().numpy().astype(np.uint8)
+                    gt_labels_np = gt_labels.detach().cpu().numpy().astype(np.uint8)
+
+                    # Define a unique filename
+                    filename = osp.join(save_dir, f'epoch_{epoch:04d}.npz')
+
+                    # Save to a compressed file
+                    np.savez_compressed(
+                        filename,
+                        prediction=pred_labels_np,
+                        ground_truth=gt_labels_np
+                    )
 
             if args.iter_resume and False:
                 if (i_iter + 1) % 50 == 0 and local_rank == 0:
