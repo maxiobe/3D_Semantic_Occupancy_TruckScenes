@@ -29,7 +29,7 @@ train_pipeline = [
 test_pipeline = [
     dict(type="LoadMultiViewImageFromFiles", to_float32=True),
     dict(type="LoadOccupancySurroundOcc", occ_path=occ_path, semantic=True, use_ego=False),
-    #dict(type="ResizeCropFlipImage"),
+    dict(type="ResizeCropFlipImage"),
     dict(type="NormalizeMultiviewImage", **img_norm_cfg),
     dict(type="DefaultFormatBundle"),
     dict(type="NuScenesAdaptor", use_ego=False, num_cams=4),
@@ -46,11 +46,11 @@ test_pipeline = [
 }"""
 data_aug_conf = dict(
     resize_lim=(1.0, 1.0),
-    final_dim=(943, 1980),         # not used when aug op is removed
+    final_dim=(928, 1952),         # not used when aug op is removed
     bot_pct_lim=(0.0, 0.0),
     rot_lim=(0.0, 0.0),
-    H=943,
-    W=1980,      # not used
+    H=928,
+    W=1952,
     rand_flip=False,
 )
 
