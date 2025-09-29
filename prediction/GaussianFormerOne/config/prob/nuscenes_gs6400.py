@@ -48,10 +48,13 @@ loss = dict(
             num_classes=17,
             use_focal_loss=False,
             use_dice_loss=False,
-            balance_cls_weight=False, #True,
+            balance_cls_weight=True, #True,
             multi_loss_weights=dict(
                 loss_voxel_ce_weight=2.0,#10.0,
+                loss_voxel_sem_scal_weight=0.0,#0.2,
+                loss_voxel_geo_scal_weight=0.0,#0.5,
                 loss_voxel_lovasz_weight=0.0),
+                #loss_voxel_lovasz_weight=0.0),
             use_sem_geo_scal_loss=False,
             use_lovasz_loss=False,
             lovasz_ignore=16,
@@ -59,8 +62,8 @@ loss = dict(
              #   1.01552756, 1.06897009, 1.30013094, 1.07253735, 0.94637502, 1.10087012,
               #  1.26960524, 1.06258364, 1.189019,   1.06217292, 1.00595144, 0.85706115,
                # 1.03923299, 0.90867526, 0.8936431,  0.85486129, 0.8527829,  0.5       ],
-            #manual_class_weight=[1.1339, 1.2342, 1.2269, 0.9952, 0.8234, 1.0237, 1.2327, 1.1060, 1.1085,
-             #                0.8140, 0.8459, 1.4710, 0.8945, 0.9810, 0.8676, 0.6794, 0.5621],
+            manual_class_weight=[1.1339, 1.2342, 1.2269, 0.9952, 0.8234, 1.0237, 1.2327, 1.1060, 1.1085,
+                             0.8140, 0.8459, 1.4710, 0.8945, 0.9810, 0.8676, 0.6794, 0.01], #0.5621
             ignore_empty=False,
             lovasz_use_softmax=False),
         dict(
@@ -90,8 +93,8 @@ loss_input_convertion = dict(
     pixel_gt="pixel_gt"
 )
 
-warmup_iters = 0
-min_lr_ratio = 1.0
+warmup_iters = 50
+min_lr_ratio = 0.01
 
 # ========= model config ===============
 embed_dims = 128
