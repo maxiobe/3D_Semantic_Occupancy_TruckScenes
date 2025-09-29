@@ -5,15 +5,20 @@ _base_ = [
 ]
 
 # =========== data config ==============
-input_shape = (1600, 864)
+#input_shape = (1600, 864)
+input_shape = (1980, 943)
 data_aug_conf = {
     "resize_lim": (1.0, 1.0),
-    "final_dim": input_shape[::-1],
+    #"final_dim": input_shape[::-1],
+    "final_dim": (943, 1980),
     "bot_pct_lim": (0.0, 0.0),
     "rot_lim": (0.0, 0.0),
-    "H": 900,
-    "W": 1600,
-    "rand_flip": True,
+    #"H": 900,
+    "H": 943,
+    #"W": 1600,
+    "W": 1980,
+    #"rand_flip": True,
+    "rand_flip": False,
 }
 val_dataset_config = dict(
     data_aug_conf=data_aug_conf
