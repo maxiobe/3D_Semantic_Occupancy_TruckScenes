@@ -29,14 +29,14 @@ train_dataset_config = dict(
 # =========== misc config ==============
 optimizer = dict(
     optimizer = dict(
-        type="AdamW", lr=4e-4, weight_decay=0.01,
+        type="AdamW", lr=4e-4, weight_decay=0.0,#0.01,
     ),
     paramwise_cfg=dict(
         custom_keys={
-            'img_backbone': dict(lr_mult=0.1)}
+            'img_backbone': dict(lr_mult=1.0)} #0.1
     )
 )
-grad_max_norm = 35
+grad_max_norm = 0 #35
 # ========= model config ===============
 loss = dict(
     type='MultiLoss',
@@ -48,19 +48,19 @@ loss = dict(
             num_classes=17,
             use_focal_loss=False,
             use_dice_loss=False,
-            balance_cls_weight=True,
+            balance_cls_weight=False, #True,
             multi_loss_weights=dict(
-                loss_voxel_ce_weight=10.0,
-                loss_voxel_lovasz_weight=1.0),
+                loss_voxel_ce_weight=2.0,#10.0,
+                loss_voxel_lovasz_weight=0.0),
             use_sem_geo_scal_loss=False,
-            use_lovasz_loss=True,
+            use_lovasz_loss=False,
             lovasz_ignore=16,
             #manual_class_weight=[
              #   1.01552756, 1.06897009, 1.30013094, 1.07253735, 0.94637502, 1.10087012,
               #  1.26960524, 1.06258364, 1.189019,   1.06217292, 1.00595144, 0.85706115,
                # 1.03923299, 0.90867526, 0.8936431,  0.85486129, 0.8527829,  0.5       ],
-            manual_class_weight=[1.1339, 1.2342, 1.2269, 0.9952, 0.8234, 1.0237, 1.2327, 1.1060, 1.1085,
-                             0.8140, 0.8459, 1.4710, 0.8945, 0.9810, 0.8676, 0.6794, 0.5621],
+            #manual_class_weight=[1.1339, 1.2342, 1.2269, 0.9952, 0.8234, 1.0237, 1.2327, 1.1060, 1.1085,
+             #                0.8140, 0.8459, 1.4710, 0.8945, 0.9810, 0.8676, 0.6794, 0.5621],
             ignore_empty=False,
             lovasz_use_softmax=False),
         dict(
@@ -89,6 +89,10 @@ loss_input_convertion = dict(
     pixel_logits="pixel_logits",
     pixel_gt="pixel_gt"
 )
+
+warmup_iters = 0
+min_lr_ratio = 1.0
+
 # ========= model config ===============
 embed_dims = 128
 num_decoder = 4
@@ -113,7 +117,7 @@ model = dict(
         depth=101,
         num_stages=4,
         out_indices=(0, 1, 2, 3),
-        frozen_stages=1,
+        frozen_stages=0,
         norm_cfg=dict(type='BN2d', requires_grad=False),
         norm_eval=True,
         style='caffe',
@@ -165,7 +169,7 @@ model = dict(
         type='GaussianOccEncoder',
         anchor_encoder=dict(
             type='SparseGaussian3DEncoder',
-            embed_dims=embed_dims, 
+            embed_dims=embed_dims,
             include_opa=include_opa,
             semantics=semantics,
             semantic_dim=semantic_dim
@@ -177,7 +181,8 @@ model = dict(
             in_channels=embed_dims,
             embed_dims=embed_dims,
             feedforward_channels=embed_dims * 4,
-            ffn_drop=0.1,
+            #ffn_drop=0.1,
+            ffn_drop=0.0,
             add_identity=False,
         ),
         deformable_model=dict(
@@ -240,7 +245,7 @@ model = dict(
             "ffn",
             "add",
             "norm",
-            
+
             "refine",
         ] * num_decoder,
     ),
