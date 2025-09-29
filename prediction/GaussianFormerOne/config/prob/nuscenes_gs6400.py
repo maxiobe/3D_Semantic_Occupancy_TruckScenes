@@ -36,7 +36,7 @@ optimizer = dict(
             'img_backbone': dict(lr_mult=1.0)} #0.1
     )
 )
-grad_max_norm = 0 #35
+grad_max_norm = 5 #35
 # ========= model config ===============
 loss = dict(
     type='MultiLoss',
