@@ -65,7 +65,8 @@ loss = dict(
             lovasz_use_softmax=False),
         dict(
             type="PixelDistributionLoss",
-            weight=1.0,
+            #weight=1.0,
+            weight=0.0,
             use_sigmoid=False),
         # dict(
         #     type="BinaryCrossEntropyLoss",
