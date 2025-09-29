@@ -334,8 +334,8 @@ def main(local_rank, args):
                             # already labels [x, y, z]
                             pred_lbl = pred_logits.to(torch.uint8)
                         else:
-                            logger.error(f"Unexpected pred shape {tuple(pred.shape)}; cannot save.")
-                            raise RuntimeError(f"Unexpected pred shape {tuple(pred.shape)}")
+                            logger.error(f"Unexpected pred shape {tuple(pred_logits.shape)}; cannot save.")
+                            raise RuntimeError(f"Unexpected pred shape {tuple(pred_logits.shape)}")
 
                     # 2) Ground truth to uint8
                     gt_lbl = gt_labels.to(torch.uint8)
@@ -354,7 +354,7 @@ def main(local_rank, args):
 
                     print(f"Shape of prediction: {pred_np.shape}")
                     print(f"Shape of gt label: {gt_np.shape}")
-                    
+
                     # Save to a compressed file
                     np.savez_compressed(
                         filename,
