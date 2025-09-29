@@ -322,6 +322,8 @@ def main(local_rank, args):
                     pred_logits = result_dict['final_occ'][0]  # Batch size is 1
                     gt_labels = result_dict['sampled_label'][0]
 
+                    print(f"pred_logits shape: {pred_logits.shape}")
+
                     # Convert to NumPy arrays for saving
                     pred_labels_np = pred_logits.argmax(0).detach().cpu().numpy().astype(np.uint8)
                     gt_labels_np = gt_labels.detach().cpu().numpy().astype(np.uint8)
