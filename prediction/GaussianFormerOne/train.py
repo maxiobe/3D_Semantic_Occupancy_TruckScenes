@@ -225,7 +225,7 @@ def main(local_rank, args):
                 i_iter = i_iter + last_iter
 
             # Create a deepcopy of data for saving logic later, to preserve original tensors
-            data_for_saving = deepcopy(data)
+            #data_for_saving = deepcopy(data)
 
             for k in list(data.keys()):
                 if isinstance(data[k], torch.Tensor):
@@ -320,7 +320,7 @@ def main(local_rank, args):
 
                     # Get prediction and ground truth
                     pred_logits = result_dict['final_occ'][0]  # Batch size is 1
-                    gt_labels = data_for_saving['sampled_label'][0]  # Use the deepcopied data
+                    gt_labels = result_dict['sampled_label'][0]
 
                     # Convert to NumPy arrays for saving
                     pred_labels_np = pred_logits.argmax(0).detach().cpu().numpy().astype(np.uint8)
