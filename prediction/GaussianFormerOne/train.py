@@ -313,6 +313,23 @@ def main(local_rank, args):
             data_time_s = time.time()
             time_s = time.time()
 
+            if (epoch + 1) % 50 == 0 and local_rank == 0:
+                pred = result_dict['final_occ'][0].detach()  # [N]
+                gt = result_dict['sampled_label'][0].detach()  # [N]
+                mask = result_dict['occ_mask'][0].flatten().detach()  # [N]
+
+                pred = pred.long()
+                gt = gt.long()
+                mask = mask.bool()
+
+                miou_metric.reset()
+                miou_metric._after_step(pred, gt, mask)
+                miou, iou2 = miou_metric._after_epoch()
+                logger.info(f'[TRAIN quick] Epoch {epoch + 1}: mIoU={miou:.4f}, iou2={iou2:.4f}')
+                if writer is not None:
+                    writer.add_scalar('TrainQuick/mIoU', miou, epoch + 1)
+                    writer.add_scalar('TrainQuick/iou2', iou2, epoch + 1)
+
             # Save every 500 epochs or on the very last epoch
             if (epoch % 200 == 0) or (epoch == max_num_epochs - 1):
                 if local_rank == 0:  # Only save on the main process
