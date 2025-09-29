@@ -19,7 +19,7 @@ img_norm_cfg = dict(
 train_pipeline = [
     dict(type="LoadMultiViewImageFromFiles", to_float32=True),
     dict(type="LoadOccupancySurroundOcc", occ_path=occ_path, semantic=True, use_ego=False),
-    #dict(type="ResizeCropFlipImage"),
+    dict(type="ResizeCropFlipImage"),
     #dict(type="PhotoMetricDistortionMultiViewImage"),
     dict(type="NormalizeMultiviewImage", **img_norm_cfg),
     dict(type="DefaultFormatBundle"),
