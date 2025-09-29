@@ -322,18 +322,44 @@ def main(local_rank, args):
                     pred_logits = result_dict['final_occ'][0]  # Batch size is 1
                     gt_labels = result_dict['sampled_label'][0]
 
-                    # Convert to NumPy arrays for saving
-                    pred_labels_np = pred_logits.argmax(0).detach().cpu().numpy().astype(np.uint8)
-                    gt_labels_np = gt_labels.detach().cpu().numpy().astype(np.uint8)
+                    # 1) Normalize prediction to integer labels [X, y, Z]
+                    with torch.no_grad():
+                        if pred_logits.ndim == 4 and pred_logits.shape[0] in (16, 17):
+                            # [C, X, Y, Z]  -> argmax over C
+                            pred_lbl = pred_logits.argmax(dim=0).to(torch.uint8)
+                        elif pred_logits.ndim == 5 and pred_logits.shape[-1] in (16, 17):
+                            # e.g. [B?, X, Y, Z, C] (rare); we already indexed batch 0 -> [Z,Y,X,C]
+                            pred_lbl = pred_logits.argmax(dim=-1).to(torch.uint8)
+                        elif pred_logits.ndim == 3:
+                            # already labels [x, y, z]
+                            pred_lbl = pred_logits.to(torch.uint8)
+                        else:
+                            logger.error(f"Unexpected pred shape {tuple(pred.shape)}; cannot save.")
+                            raise RuntimeError(f"Unexpected pred shape {tuple(pred.shape)}")
+
+                    # 2) Ground truth to uint8
+                    gt_lbl = gt_labels.to(torch.uint8)
+
+                    # 3) Move to CPU numpy, ensure contiguous
+                    pred_np = np.ascontiguousarray(pred_lbl.detach().cpu().numpy())
+                    gt_np = np.ascontiguousarray(gt_lbl.detach().cpu().numpy())
+
+                    # 4) Optional sanity checks (fail fast if wrong)
+                    assert pred_np.ndim == 3 and gt_np.ndim == 3, f"Bad dims: pred {pred_np.shape}, gt {gt_np.shape}"
+                    assert pred_np.shape == gt_np.shape, f"Shape mismatch: pred {pred_np.shape} vs gt {gt_np.shape}"
+                    assert pred_np.dtype == np.uint8 and gt_np.dtype == np.uint8
 
                     # Define a unique filename
                     filename = osp.join(save_dir, f'epoch_{epoch:04d}.npz')
 
+                    print(f"Shape of prediction: {pred_np.shape}")
+                    print(f"Shape of gt label: {gt_np.shape}")
+                    
                     # Save to a compressed file
                     np.savez_compressed(
                         filename,
-                        prediction=pred_labels_np,
-                        ground_truth=gt_labels_np
+                        prediction=pred_np,
+                        ground_truth=gt_np
                     )
 
             if args.iter_resume and False:
