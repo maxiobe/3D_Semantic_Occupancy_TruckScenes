@@ -218,6 +218,9 @@ gt_generation/manual_annotation
 prediction/BEVFormer/work_dirs
 prediction/BEVFormer/data_info
 
+prediction/BEVFormer200x16/work_dirs
+prediction/BEVFormer200x16/data_info
+
 prediction/GaussianFormer/ckpts
 prediction/GaussianFormer/out
 prediction/GaussianFormer/data_info
@@ -236,3 +239,6 @@ prediction/GaussianFormerOne/data_info
 
 prediction/SparseOcc/data_info
 prediction/SparseOcc/pretrain
+
+prediction/SparseOcc200x16/data_info
+prediction/SparseOcc200x16/pretrain
