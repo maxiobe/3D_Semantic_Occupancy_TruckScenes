@@ -239,6 +239,10 @@ prediction/GaussianFormerOne/ckpts
 prediction/GaussianFormerOne/out
 prediction/GaussianFormerOne/data_info
 
+prediction/GaussianFormerOne200x16/ckpts
+prediction/GaussianFormerOne200x16/out
+prediction/GaussianFormerOne200x16/data_info
+
 prediction/SparseOcc/data_info
 prediction/SparseOcc/pretrain
 
