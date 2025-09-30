@@ -5,15 +5,18 @@ _base_ = [
 ]
 
 # =========== data config ==============
-input_shape = (1600, 864)
+#input_shape = (1600, 864)
 data_aug_conf = {
     "resize_lim": (1.0, 1.0),
-    "final_dim": input_shape[::-1],
+    #"final_dim": input_shape[::-1],
+    "final_dim": (928, 1952),
     "bot_pct_lim": (0.0, 0.0),
     "rot_lim": (0.0, 0.0),
-    "H": 900,
-    "W": 1600,
-    "rand_flip": True,
+    #"H": 900,
+    "H": 928,
+    #"W": 1600,
+    "W": 1952,
+    "rand_flip": False,
 }
 val_dataset_config = dict(
     data_aug_conf=data_aug_conf
@@ -55,7 +58,7 @@ loss = dict(
               #  1.26960524, 1.06258364, 1.189019,   1.06217292, 1.00595144, 0.85706115,
                # 1.03923299, 0.90867526, 0.8936431,  0.85486129, 0.5]), #nuscenes
             manual_class_weight=[1.1339, 1.2342, 1.2269, 0.9952, 0.8234, 1.0237, 1.2327, 1.1060, 1.1085,
-                 0.8140, 0.8459, 1.4710, 0.8945, 0.9810, 0.8676, 0.6794, 0.5621]),
+                 0.8140, 0.8459, 1.4710, 0.8945, 0.9810, 0.8676, 0.6794, 0.01]), #0.5621
             #manual_class_weight=[1.2771, 1.3038, 1.3166, 1.2380, 0.8050, 1.3117, 1.3477, 1.0312, 0.9341,
             #    0.8643, 0.8381, 1.4347, 0.8050, 1.2099, 1.2827, 0.65, 0.5]),
         ])
@@ -71,12 +74,12 @@ embed_dims = 128
 num_decoder = 4 #3 #nuscenes: 4
 num_single_frame_decoder = 1
 #pc_range = [-50.0, -50.0, -5.0, 50.0, 50.0, 3.0]
-# pc_range = [-40, -40, -1, 40, 40, 5.4]
-pc_range = [-75, -75, -2, 75, 75, 10.8]
-#grid_size=0.4
-grid_size=0.2
-#voxel_shape = [200, 200, 16]
-voxel_shape = [750, 750, 64]
+pc_range = [-40, -40, -1, 40, 40, 5.4]
+#pc_range = [-75, -75, -2, 75, 75, 10.8]
+grid_size=0.4
+#grid_size=0.2
+voxel_shape = [200, 200, 16]
+#voxel_shape = [750, 750, 64]
 
 scale_range = [0.08, 0.64]
 xyz_coordinate = 'cartesian'
