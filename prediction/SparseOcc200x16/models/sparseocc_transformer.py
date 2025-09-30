@@ -64,7 +64,8 @@ class SparseOccTransformer(BaseModule):
     def forward(self, mlvl_feats, img_metas):
         for lvl, feat in enumerate(mlvl_feats):
             B, TN, GC, H, W = feat.shape  # [B, TN, GC, H, W]
-            N, T, G, C = 6, TN // 6, 4, GC // 4
+            #N, T, G, C = 6, TN // 6, 4, GC // 4
+            N, T, G, C = 4, TN // 4, 4, GC // 4
             feat = feat.reshape(B, T, N, G, C, H, W)
             feat = feat.permute(0, 1, 3, 2, 5, 6, 4)  # [B, T, G, N, H, W, C]
             feat = feat.reshape(B*T*G, N, H, W, C)  # [BTG, N, H, W, C]

@@ -59,7 +59,7 @@ class SparseOcc(MVXTwoStageDetector):
     @auto_fp16(apply_to=('img'))
     def extract_feat(self, img, img_metas=None):
         """Extract features from images and points."""
-        if len(img.shape) == 6:
+        if len(img.shape) == 4: #6
             img = img.flatten(1, 2)  # [B, TN, C, H, W]
 
         B, N, C, H, W = img.size()
@@ -173,10 +173,11 @@ class SparseOcc(MVXTwoStageDetector):
         assert len(img_metas) == 1  # batch_size = 1
 
         B, N, C, H, W = img.shape
-        img = img.reshape(B, N//6, 6, C, H, W)
+        #img = img.reshape(B, N//6, 6, C, H, W)
+        img = img.reshape(B, N // 4, 4, C, H, W)
 
         img_filenames = img_metas[0]['filename']
-        num_frames = len(img_filenames) // 6
+        num_frames = len(img_filenames) // 4 #6
         # assert num_frames == img.shape[1]
 
         img_shape = (H, W, C)
@@ -188,7 +189,7 @@ class SparseOcc(MVXTwoStageDetector):
 
         # extract feature frame by frame
         for i in range(num_frames):
-            img_indices = list(np.arange(i * 6, (i + 1) * 6))
+            img_indices = list(np.arange(i * 4, (i + 1) * 4)) #list(np.arange(i * 6, (i + 1) * 6))
 
             img_metas_curr = [{}]
             for k in img_metas[0].keys():
