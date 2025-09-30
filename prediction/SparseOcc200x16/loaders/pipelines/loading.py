@@ -47,7 +47,8 @@ class LoadMultiViewImageFromMultiSweeps(object):
         self.test_mode = test_mode
 
         self.train_interval = [4, 8]
-        self.test_interval = 6
+        #self.test_interval = 6
+        self.test_interval = 4
 
         try:
             mmcv.use_backend('turbojpeg')
@@ -55,10 +56,11 @@ class LoadMultiViewImageFromMultiSweeps(object):
             mmcv.use_backend('cv2')
 
     def load_offline(self, results):
-        cam_types = [
-            'CAM_FRONT', 'CAM_FRONT_RIGHT', 'CAM_FRONT_LEFT',
-            'CAM_BACK', 'CAM_BACK_LEFT', 'CAM_BACK_RIGHT'
-        ]
+        #cam_types = [
+         #   'CAM_FRONT', 'CAM_FRONT_RIGHT', 'CAM_FRONT_LEFT',
+          #  'CAM_BACK', 'CAM_BACK_LEFT', 'CAM_BACK_RIGHT'
+        #]
+        cam_types = ['CAMERA_LEFT_FRONT', 'CAMERA_RIGHT_FRONT', 'CAMERA_LEFT_BACK', 'CAMERA_RIGHT_BACK']
 
         if len(results['sweeps']['prev']) == 0:
             for _ in range(self.sweeps_num):
@@ -111,12 +113,14 @@ class LoadMultiViewImageFromMultiSweeps(object):
     def load_online(self, results):
         # only used when measuring FPS
         assert self.test_mode
-        assert self.test_interval % 6 == 0
+        #assert self.test_interval % 6 == 0
+        assert self.test_interval % 4 == 0
 
-        cam_types = [
-            'CAM_FRONT', 'CAM_FRONT_RIGHT', 'CAM_FRONT_LEFT',
-            'CAM_BACK', 'CAM_BACK_LEFT', 'CAM_BACK_RIGHT'
-        ]
+        #cam_types = [
+         #   'CAM_FRONT', 'CAM_FRONT_RIGHT', 'CAM_FRONT_LEFT',
+          #  'CAM_BACK', 'CAM_BACK_LEFT', 'CAM_BACK_RIGHT'
+        #]
+        cam_types = ['CAMERA_LEFT_FRONT', 'CAMERA_RIGHT_FRONT', 'CAMERA_LEFT_BACK', 'CAMERA_RIGHT_BACK']
 
         if len(results['sweeps']['prev']) == 0:
             for _ in range(self.sweeps_num):
@@ -168,7 +172,7 @@ class LoadMultiViewImageFromMultiSweeps(object):
 
 @PIPELINES.register_module()
 class LoadOccGTFromFile(object):
-    def __init__(self, num_classes=18, inst_class_ids=[]):
+    def __init__(self, num_classes=17, inst_class_ids=[]):
         self.num_classes = num_classes
         self.inst_class_ids = inst_class_ids
     
