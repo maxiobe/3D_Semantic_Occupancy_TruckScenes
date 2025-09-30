@@ -1,0 +1,12 @@
+# requirements.txt
+ipython==8.12
+numpy==1.21.0
+matplotlib==3.5.2
+numba==0.53.0
+pandas==1.4.4
+scikit-image==0.19.3
+setuptools==59.6.0
+nuscenes-devkit==1.1.10
+truckscenes-devkit==1.0.0
+simplejson==3.20.1
+yapf==0.31.0
