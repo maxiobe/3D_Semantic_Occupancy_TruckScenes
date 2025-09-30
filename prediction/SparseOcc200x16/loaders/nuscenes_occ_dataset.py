@@ -77,7 +77,7 @@ class NuSceneOcc(NuScenesDataset):
         )
 
         ego2lidar = transform_matrix(lidar2ego_translation, Quaternion(lidar2ego_rotation), inverse=True)
-        input_dict['ego2lidar'] = [ego2lidar for _ in range(6)]
+        input_dict['ego2lidar'] = [ego2lidar for _ in range(4)] #6
         input_dict['occ_path'] = os.path.join(self.occ_gt_root, info['scene_name'], info['token'], 'labels.npz')
 
         if self.modality['use_camera']:
