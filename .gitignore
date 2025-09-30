@@ -206,7 +206,7 @@ marimo/_lsp/
 __marimo__/
 
 # Checkpoints
-prediction/BEVFormer/ckpts/
+
 
 # Results of Kiss/ Mapmos
 gt_generation/results
@@ -217,9 +217,11 @@ gt_generation/manual_annotation
 
 prediction/BEVFormer/work_dirs
 prediction/BEVFormer/data_info
+prediction/BEVFormer/ckpts/
 
 prediction/BEVFormer200x16/work_dirs
 prediction/BEVFormer200x16/data_info
+prediction/BEVFormer200x16/ckpts/
 
 prediction/GaussianFormer/ckpts
 prediction/GaussianFormer/out
