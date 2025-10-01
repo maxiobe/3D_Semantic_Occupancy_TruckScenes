@@ -18,21 +18,21 @@ img_norm_cfg = dict(
 
 train_pipeline = [
     dict(type="LoadMultiViewImageFromFiles", to_float32=True),
-    dict(type="LoadOccupancySurroundOcc", occ_path=occ_path, semantic=True, use_ego=False, transform_to_lidar=True),
+    dict(type="LoadOccupancySurroundOcc", occ_path=occ_path, semantic=True, use_ego=True), #transform_to_lidar=True),
     dict(type="ResizeCropFlipImage"),
     #dict(type="PhotoMetricDistortionMultiViewImage"),
     dict(type="NormalizeMultiviewImage", **img_norm_cfg),
     dict(type="DefaultFormatBundle"),
-    dict(type="NuScenesAdaptor", use_ego=False, num_cams=4),
+    dict(type="NuScenesAdaptor", use_ego=True, num_cams=4),
 ]
 
 test_pipeline = [
     dict(type="LoadMultiViewImageFromFiles", to_float32=True),
-    dict(type="LoadOccupancySurroundOcc", occ_path=occ_path, semantic=True, use_ego=False, transform_to_lidar=True),
+    dict(type="LoadOccupancySurroundOcc", occ_path=occ_path, semantic=True, use_ego=True), #transform_to_lidar=True),
     dict(type="ResizeCropFlipImage"),
     dict(type="NormalizeMultiviewImage", **img_norm_cfg),
     dict(type="DefaultFormatBundle"),
-    dict(type="NuScenesAdaptor", use_ego=False, num_cams=4),
+    dict(type="NuScenesAdaptor", use_ego=True, num_cams=4),
 ]
 
 """data_aug_conf = {

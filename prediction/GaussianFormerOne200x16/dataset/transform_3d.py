@@ -473,28 +473,15 @@ class LoadPseudoPointFromFile(object):
 @OPENOCC_TRANSFORMS.register_module()
 class LoadOccupancySurroundOcc(object):
 
-    def __init__(self, occ_path, semantic=False, use_ego=False, use_sweeps=False, perturb=False, transform_to_lidar=False):
+    def __init__(self, occ_path, semantic=False, use_ego=False, use_sweeps=False, perturb=False):
         self.occ_path = occ_path
         self.semantic = semantic
         self.use_ego = use_ego
-        assert semantic and (not use_ego)
+        #assert semantic and (not use_ego)
         self.use_sweeps = use_sweeps
         self.perturb = perturb
-        self.transform_to_lidar = transform_to_lidar
 
-        self.pc_range = [-40, -40, -1.0, 40, 40, 5.4]
-        self.grid_size = [200, 200, 16]
-        self.empty_label = 16
-
-        # Pre-calculate grid properties
-        self.voxel_size = np.array([
-            (self.pc_range[3] - self.pc_range[0]) / self.grid_size[0],
-            (self.pc_range[4] - self.pc_range[1]) / self.grid_size[1],
-            (self.pc_range[5] - self.pc_range[2]) / self.grid_size[2],
-        ])
-        self.pc_range_min = np.array(self.pc_range[:3])
-
-        xyz = self.get_meshgrid(self.pc_range, self.grid_size, 0.4)
+        xyz = self.get_meshgrid([-40, -40, -1.0, 40, 40, 5.4], [200, 200, 16], 0.4)
         #xyz = self.get_meshgrid([-75, -75, -2.0, 75, 75, 10.8], [750, 750, 64], 0.2)
         self.xyz = np.concatenate([xyz, np.ones_like(xyz[..., :1])], axis=-1) # x, y, z, 4
 
@@ -518,79 +505,49 @@ class LoadOccupancySurroundOcc(object):
         #print(results)
         label_file = results['occ_path']
 
-        if not os.path.exists(label_file):
-            if self.use_sweeps:
-                shape = tuple(self.grid_size)
-                results['occ_label'] = np.ones(shape, dtype=np.int64) * self.empty_label
-                results['occ_cam_mask'] = np.zeros(shape, dtype=bool)
+        #print(f"Label file: {label_file}")
 
-                xyz = self.xyz.copy()
-                if getattr(self, "perturb", False):
-                    # xyz[..., :3] = xyz[..., :3] + (np.random.rand(*xyz.shape[:-1], 3) - 0.5) * (0.5 - 1e-3)
-                    norm_distribution = np.clip(np.random.randn(*xyz.shape[:-1], 3) / 6, -0.5, 0.5)
-                    xyz[..., :3] = xyz[..., :3] + norm_distribution * 0.49
-
-                results['occ_xyz'] = xyz[..., :3]
-                return results
-            else:
-                raise FileNotFoundError(f"Occupancy label file not found: {label_file}")
-        elif os.path.exists(label_file):
+        if os.path.exists(label_file):
             npz_data = np.load(label_file) # Added maxiobe
 
-            ego_labels = npz_data['semantics'].astype(np.int64)
+            dense_label = npz_data['semantics']
 
-            if self.transform_to_lidar:
-                # === ON-THE-FLY TRANSFORMATION LOGIC ===
-                ego2lidar_matrix = results['ego2lidar']
+            #new_label = np.ones((200, 200, 16), dtype=np.int64) * 16
+            #new_label[label[:, 0], label[:, 1], label[:, 2]] = label[:, 3]
 
-                # 1. Find the indices of all non-empty voxels in the ego grid
-                occupied_indices = np.argwhere(ego_labels != self.empty_label)
+            mask = (dense_label != 0)
+            #mask = new_label != 0
+            #mask = npz_data['mask_camera']
 
-                # 2. Get the semantic label for each of those voxels
-                occupied_labels = ego_labels[occupied_indices[:, 0], occupied_indices[:, 1], occupied_indices[:, 2]]
-
-                # 3. De-Voxelize: Convert grid indices to real-world (x,y,z) coordinates in the Ego Frame
-                ego_coords = occupied_indices.astype(
-                    np.float32) * self.voxel_size + self.pc_range_min + 0.5 * self.voxel_size
-
-                # 4. Transform: Apply the ego2lidar matrix to get coordinates in the Lidar Frame
-                ego_coords_homo = np.concatenate([ego_coords, np.ones((ego_coords.shape[0], 1))], axis=1)
-                lidar_coords_homo = (ego2lidar_matrix @ ego_coords_homo.T).T
-                lidar_coords = lidar_coords_homo[:, :3]
-
-                # 5. Re-Voxelize: Convert the new Lidar-frame coordinates back into grid indices
-                new_indices = np.floor((lidar_coords - self.pc_range_min) / self.voxel_size).astype(np.int32)
-
-                # 6. Create the new Lidar-frame grid, filtering out any points that fall outside
-                mask = (new_indices[:, 0] >= 0) & (new_indices[:, 0] < self.grid_size[0]) & \
-                       (new_indices[:, 1] >= 0) & (new_indices[:, 1] < self.grid_size[1]) & \
-                       (new_indices[:, 2] >= 0) & (new_indices[:, 2] < self.grid_size[2])
-
-                valid_indices = new_indices[mask]
-                valid_labels = occupied_labels[mask]
-
-                final_labels = np.ones(tuple(self.grid_size), dtype=np.int64) * self.empty_label
-                final_labels[valid_indices[:, 0], valid_indices[:, 1], valid_indices[:, 2]] = valid_labels
-
-                results['occ_label'] = final_labels if self.semantic else final_labels != self.empty_label
-                results['occ_cam_mask'] = (final_labels != 0)
-
-            else:
-                # If not transforming, use the original ego labels
-                results['occ_label'] = ego_labels if self.semantic else ego_labels != self.empty_label
-                results['occ_cam_mask'] = (ego_labels != 0)
-
-            xyz = self.xyz.copy()
-            if getattr(self, "perturb", False):
-                # xyz[..., :3] = xyz[..., :3] + (np.random.rand(*xyz.shape[:-1], 3) - 0.5) * (0.5 - 1e-3)
-                norm_distribution = np.clip(np.random.randn(*xyz.shape[:-1], 3) / 6, -0.5, 0.5)
-                xyz[..., :3] = xyz[..., :3] + norm_distribution * 0.49
-
-            results['occ_xyz'] = xyz[..., :3]
-
-            return results
+            #results['occ_label'] = new_label if self.semantic else new_label != 16
+            results['occ_label'] = dense_label if self.semantic else (dense_label != 16)
+            results['occ_cam_mask'] = mask
+        elif self.use_sweeps:
+            new_label = np.ones((200, 200, 16), dtype=np.int64) * 16
+            #new_label = np.ones((750, 750, 64), dtype=np.int64) * 16
+            mask = (new_label != 0)
+            results['occ_label'] = new_label if self.semantic else new_label != 16
+            results['occ_cam_mask'] = mask
         else:
             raise NotImplementedError
+
+        xyz = self.xyz.copy()
+        if getattr(self, "perturb", False):
+            # xyz[..., :3] = xyz[..., :3] + (np.random.rand(*xyz.shape[:-1], 3) - 0.5) * (0.5 - 1e-3)
+            norm_distribution = np.clip(np.random.randn(*xyz.shape[:-1], 3) / 6, -0.5, 0.5)
+            xyz[..., :3] = xyz[..., :3] + norm_distribution * 0.49
+
+        occ_xyz = xyz[..., :3]
+
+        """if not self.use_ego:
+            occ_xyz = xyz[..., :3]
+        else:
+            ego2lidar = np.linalg.inv(results['ego2lidar']) # 4, 4
+            occ_xyz = ego2lidar[None, None, None, ...] @ xyz[..., None] # x, y, z, 4, 1
+            occ_xyz = np.squeeze(occ_xyz, -1)[..., :3]"""
+
+        results['occ_xyz'] = occ_xyz
+        return results
 
     def __repr__(self):
         """str: Return a string that describes the module."""
