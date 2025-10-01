@@ -5,7 +5,7 @@ _base_ = [
 ]
 
 # =========== data config ==============
-input_shape = (1600, 864)
+"""input_shape = (1600, 864)
 data_aug_conf = {
     "resize_lim": (1.0, 1.0),
     "final_dim": input_shape[::-1],
@@ -14,9 +14,28 @@ data_aug_conf = {
     "H": 900,
     "W": 1600,
     "rand_flip": True,
-}
+}"""
+
+data_aug_conf = dict(
+    resize_lim=(1.02, 1.05),   # never smaller than raw
+    final_dim=(960, 1984),     # both divisible by 32
+    bot_pct_lim=(0.0, 0.15),
+    rot_lim=(-3.0, 3.0),
+    H=943, W=1980,
+    rand_flip=True,
+)
+
+val_data_aug_conf = dict(
+    resize_lim=(1.02, 1.02),
+    final_dim=(960, 1984),
+    bot_pct_lim=(0.0, 0.0),
+    rot_lim=(0.0, 0.0),
+    H=943, W=1980,
+    rand_flip=False,
+)
+
 val_dataset_config = dict(
-    data_aug_conf=data_aug_conf
+    data_aug_conf=val_data_aug_conf
 )
 train_dataset_config = dict(
     data_aug_conf=data_aug_conf
@@ -58,7 +77,7 @@ loss = dict(
               #  1.26960524, 1.06258364, 1.189019,   1.06217292, 1.00595144, 0.85706115,
                # 1.03923299, 0.90867526, 0.8936431,  0.85486129, 0.8527829,  0.5       ],
             manual_class_weight=[1.1339, 1.2342, 1.2269, 0.9952, 0.8234, 1.0237, 1.2327, 1.1060, 1.1085,
-                             0.8140, 0.8459, 1.4710, 0.8945, 0.9810, 0.8676, 0.6794, 0.5621],
+                             0.8140, 0.8459, 1.4710, 0.8945, 0.9810, 0.8676, 0.6794, 0.02], #0.5621
             ignore_empty=False,
             lovasz_use_softmax=False),
         dict(
@@ -147,7 +166,7 @@ model = dict(
                 with_cp=True,
                 dcn=dict(type='DCNv2', deform_groups=1, fallback_on_stride=False), # original DCNv2 will print log when perform load_state_dict
                 stage_with_dcn=(False, False, True, True)),
-            neck_confifg=dict(
+            neck_config=dict(
                 type='SECONDFPN',
                 in_channels=[256, 512, 1024, 2048],
                 out_channels=[embed_dims] * 4,
