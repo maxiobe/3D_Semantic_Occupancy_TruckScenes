@@ -44,13 +44,21 @@ test_pipeline = [
     "W": 1600,
     "rand_flip": True,
 }"""
-data_aug_conf = dict(
+"""data_aug_conf = dict(
     resize_lim=(1.0, 1.0),
     final_dim=(928, 1952),         # not used when aug op is removed
     bot_pct_lim=(0.0, 0.0),
     rot_lim=(0.0, 0.0),
     H=928,
     W=1952,
+    rand_flip=True,
+)"""
+data_aug_conf = dict(
+    resize_lim=(1.00, 1.05),   # never smaller than raw
+    final_dim=(960, 1984),     # both divisible by 32
+    bot_pct_lim=(0.0, 0.15),
+    rot_lim=(-3.0, 3.0),
+    H=943, W=1980,
     rand_flip=True,
 )
 
