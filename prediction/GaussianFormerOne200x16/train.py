@@ -332,57 +332,53 @@ def main(local_rank, args):
 
             # Save every 200 epochs or on the very last epoch
             if (epoch % 200 == 0) or (epoch == max_num_epochs - 1):
-                if local_rank == 0:  # Only save on the main process
+                if local_rank == 0:
                     logger.info(f"--- Saving prediction at epoch {epoch} ---")
-
-                    # Where to save
                     filename = osp.join(save_dir, f'epoch_{epoch:04d}.npz')
 
-                    # Tensors from the current forward
                     occ_mask_3d = result_dict['occ_mask'][0].detach().bool()  # [Z,Y,X]
-                    pred_ = result_dict['final_occ'][0].detach().long()  # [N] or [Z,Y,X]
+                    pred_ = result_dict['final_occ'][0].detach().long()  # [N] or flat [Z*Y*X]
                     gt_ = result_dict['sampled_label'][0].detach().long()  # [N] or [Z,Y,X]
 
-                    # Sanity checks
-                    assert occ_mask_3d.ndim == 3, f"occ_mask must be 3D [Z,Y,X], got {tuple(occ_mask_3d.shape)}"
+                    assert occ_mask_3d.ndim == 3, f"occ_mask must be 3D [Z,Y,X], got {occ_mask_3d.shape}"
                     num_mask = int(occ_mask_3d.sum().item())
                     grid_num = int(occ_mask_3d.numel())
-                    assert pred_.numel() in (num_mask, grid_num), \
-                        f"pred numel {pred_.numel()} not in {{mask:{num_mask}, grid:{grid_num}}}"
-                    if pred_.numel() == grid_num:
-                        assert tuple(pred_.shape) == tuple(occ_mask_3d.shape), \
-                            f"dense pred shape {tuple(pred_.shape)} != mask shape {tuple(occ_mask_3d.shape)}"
 
-                    EMPTY = 17  # your empty_label in MeanIoU
+                    EMPTY = 17  # empty/unknown label
 
                     def to_dense(labels, mask3d):
-                        """Convert masked vector [N] to dense [Z,Y,X] using EMPTY outside mask."""
-                        if labels.ndim == 1:
+                        """Return dense [Z,Y,X] labels given possible input forms."""
+                        if labels.ndim == 3:
+                            # already dense
+                            return labels
+                        labels = labels.contiguous()
+                        n = labels.numel()
+                        if n == num_mask:
+                            # masked vector -> fill EMPTY and write into mask
                             dense = torch.full(mask3d.shape, EMPTY, dtype=torch.long, device=labels.device)
                             dense[mask3d] = labels
                             return dense
-                        return labels  # already dense
+                        if n == grid_num:
+                            # dense-flat -> reshape to grid (assumes C-order flatten/view)
+                            return labels.view(mask3d.shape)
+                        raise ValueError(f"Unexpected labels shape/length: {tuple(labels.shape)} "
+                                         f"(mask sum={num_mask}, grid num={grid_num})")
 
-                    # Densify + make C-contiguous before converting to NumPy
                     pred_dense = to_dense(pred_, occ_mask_3d).contiguous().cpu().numpy().astype(np.uint8)
                     gt_dense = to_dense(gt_, occ_mask_3d).contiguous().cpu().numpy().astype(np.uint8)
                     valid_mask = occ_mask_3d.cpu().numpy().astype(np.bool_)
 
-                    # Grid metadata (prefer pulling from cfg; fall back to Occ3D defaults)
-                    vx = cfg.get('voxel_size', None)
-                    pc_rng = cfg.get('pc_range', None)
-                    if vx is None:
-                        vx = [0.4, 0.4, 0.4]
-                    elif isinstance(vx, (int, float)):
+                    # Pull from cfg if available; otherwise fall back to defaults
+                    vx = cfg.get('voxel_size', [0.4, 0.4, 0.4])
+                    if isinstance(vx, (int, float)):
                         vx = [float(vx), float(vx), float(vx)]
-                    if pc_rng is None:
-                        pc_rng = [-40, -40, -1, 40, 40, 5.4]
+                    pc_rng = cfg.get('pc_range', [-40, -40, -1, 40, 40, 5.4])
 
                     np.savez_compressed(
                         filename,
-                        prediction=pred_dense,
-                        ground_truth=gt_dense,
-                        valid_mask=valid_mask,
+                        prediction=pred_dense,  # [Z,Y,X]
+                        ground_truth=gt_dense,  # [Z,Y,X]
+                        valid_mask=valid_mask,  # [Z,Y,X]
                         axes_order="XYZ",
                         grid_shape=np.array(pred_dense.shape, np.int32),
                         voxel_size=np.asarray(vx, dtype=np.float32),
@@ -391,10 +387,9 @@ def main(local_rank, args):
                         empty_label=np.array([EMPTY], np.int32),
                     )
 
-                    # Quick invariants (safe to comment out later)
-                    assert (pred_dense[~valid_mask] == EMPTY).all(), "outside-mask voxels must be EMPTY"
-                    # Optional (may fail early in training if model predicts EMPTY):
-                    # assert not (pred_dense[valid_mask] == EMPTY).any(), "inside-mask voxels shouldn't be EMPTY"
+                    # Invariants (ok to comment out later)
+                    assert pred_dense.shape == tuple(occ_mask_3d.shape)
+                    assert (pred_dense[~valid_mask] == EMPTY).all(), "outside-mask must be EMPTY"
 
             if args.iter_resume and False:
                 if (i_iter + 1) % 50 == 0 and local_rank == 0:
