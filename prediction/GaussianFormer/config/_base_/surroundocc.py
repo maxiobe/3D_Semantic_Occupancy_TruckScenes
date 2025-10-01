@@ -55,7 +55,7 @@ data_aug_conf = dict(
 )
 
 val_data_aug_conf = dict(
-    resize_lim=(1.02, 1.02),
+    resize_lim=(1.00, 1.00),
     final_dim=(960, 1984),
     bot_pct_lim=(0.0, 0.0),
     rot_lim=(0.0, 0.0),

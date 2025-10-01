@@ -45,10 +45,15 @@ optimizer = dict(
     optimizer = dict(
         type="AdamW", lr=4e-4, weight_decay=0.01,
     ),
-    paramwise_cfg=dict(
-        custom_keys={
-            'img_backbone': dict(lr_mult=0.1)}
-    )
+    paramwise_cfg=dict(custom_keys={
+        'img_backbone': dict(lr_mult=0.1),
+        # lifter pieces — tiny LRs
+        'lifter.initialize_backbone': dict(lr_mult=0.01),# 4e-4 * 0.01 = 4e-6
+        'lifter.projection': dict(lr_mult=0.02), # 8e-6
+        'lifter.anchor': dict(lr_mult=0.01, decay_mult=0.0),  # 4e-6, no WD
+        'lifter.random_anchors': dict(lr_mult=0.01, decay_mult=0.0),  # 4e-6, no WD
+        'lifter.instance_feature': dict(lr_mult=0.01, decay_mult=0.0),  # 4e-6, no WD
+    })
 )
 grad_max_norm = 35
 # ========= model config ===============
@@ -121,7 +126,7 @@ semantic_dim = 16
 #semantic_dim = 17
 
 model = dict(
-    freeze_lifter=True,
+    freeze_lifter=False,
     img_backbone_out_indices=[0, 1, 2, 3],
     img_backbone=dict(
         _delete_=True,
@@ -142,8 +147,8 @@ model = dict(
         type='GaussianLifterV2',
         num_anchor=19200,
         embed_dims=embed_dims,
-        anchor_grad=False,
-        feat_grad=False,
+        anchor_grad=True,
+        feat_grad=True,
         semantics=semantics,
         semantic_dim=semantic_dim,
         include_opa=include_opa,
