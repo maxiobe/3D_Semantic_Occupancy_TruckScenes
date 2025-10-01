@@ -92,7 +92,7 @@ class GaussianLifterV2(BaseLifter):
         self.sampler = DistributionSampler()
         self.num_samples = num_samples
         self.register_buffer("depth_bins", torch.linspace(
-            1.0, 72.0, self.num_samples, dtype=torch.float), persistent=False)
+            1.0, 90.0, self.num_samples, dtype=torch.float), persistent=False) #72.0
         self.register_buffer("pc_start", torch.tensor(
             pc_range[:3], dtype=torch.float), persistent=False)
         self.pc_range = pc_range
