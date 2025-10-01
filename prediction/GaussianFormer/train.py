@@ -124,7 +124,7 @@ def main(local_rank, args):
             optimizer,
             t_initial=len(train_dataset_loader) * max_num_epochs,
             lr_min=cfg.optimizer["optimizer"]["lr"] * cfg.get("min_lr_ratio", 0.1), #1e-6,
-            warmup_t=cfg.get('warmup_iters', 500),
+            warmup_t=cfg.get('warmup_iters', 800), #500
             warmup_lr_init=1e-6,
             t_in_epochs=False)
     amp = cfg.get('amp', False)
@@ -353,6 +353,32 @@ def main(local_rank, args):
                         gt_occ = result_dict['sampled_label'][idx]
                         occ_mask = result_dict['occ_mask'][idx].flatten()
                         miou_metric._after_step(pred_occ, gt_occ, occ_mask)
+
+                        is_master = (not distributed) or (
+                                dist.is_available() and dist.is_initialized() and dist.get_rank() == 0)  # FIX
+                        if is_master and ((i_iter_val) % 500 == 0):
+                            save_root = os.path.join(args.work_dir, "val_dumps", f"epoch_{epoch:03d}")
+                            os.makedirs(save_root, exist_ok=True)
+
+                            pred_np = pred_occ.detach().cpu().numpy()
+                            gt_np = gt_occ.detach().cpu().numpy()
+                            occ_mask_3d = result_dict["occ_mask"][idx].detach().cpu().numpy().astype(np.bool_)
+                            grid_shape = np.array(occ_mask_3d.shape, dtype=np.int32)
+
+                            file_path = os.path.join(
+                                save_root, f"iter_{(i_iter_val):06d}_b{idx}.npz"
+                            )
+
+                            np.savez_compressed(
+                                file_path,
+                                ground_truth=gt_np,  # 1D, length N
+                                predictions=pred_np,  # 1D, length N
+                                occ_mask=occ_mask_3d,  # 3D, e.g. (200, 200, 16)
+                                grid_shape=grid_shape  # (X, Y, Z) for quick reshape
+                            )
+                            logger.info(f"[EVAL] Saved dumps at iter {i_iter_val} to {save_root}")
+
+
                 
                 val_loss_list.append(loss.detach().cpu().numpy())
                 if i_iter_val % print_freq == 0 and local_rank == 0:
