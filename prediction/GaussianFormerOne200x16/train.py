@@ -347,22 +347,35 @@ def main(local_rank, args):
                     EMPTY = 17  # empty/unknown label
 
                     def to_dense(labels, mask3d):
-                        """Return dense [Z,Y,X] labels given possible input forms."""
-                        if labels.ndim == 3:
-                            # already dense
-                            return labels
-                        labels = labels.contiguous()
-                        n = labels.numel()
-                        if n == num_mask:
-                            # masked vector -> fill EMPTY and write into mask
-                            dense = torch.full(mask3d.shape, EMPTY, dtype=torch.long, device=labels.device)
-                            dense[mask3d] = labels
+                        """
+                        Return dense [Z,Y,X] labels, guaranteeing that outside mask == EMPTY.
+                        Accepts:
+                          - masked vector [N]
+                          - dense-flat [Z*Y*X]
+                          - dense [Z,Y,X]
+                        """
+                        if labels.ndim == 1:
+                            n = labels.numel()
+                            if n == int(mask3d.sum().item()):
+                                dense = torch.full(mask3d.shape, EMPTY, dtype=torch.long, device=labels.device)
+                                dense[mask3d] = labels
+                                return dense
+                            if n == int(mask3d.numel()):
+                                dense = labels.view(mask3d.shape)
+                                dense = dense.clone()  # avoid modifying the view
+                                dense[~mask3d] = EMPTY  # zero out unsupervised voxels
+                                return dense
+                            raise ValueError(
+                                f"Unexpected labels length {n} (mask sum={int(mask3d.sum())}, grid num={int(mask3d.numel())})")
+                        else:
+                            # already [Z,Y,X]
+                            dense = labels
+                            if dense.shape != mask3d.shape:
+                                raise ValueError(
+                                    f"dense shape {tuple(dense.shape)} != mask shape {tuple(mask3d.shape)}")
+                            dense = dense.clone()
+                            dense[~mask3d] = EMPTY  # enforce EMPTY outside mask
                             return dense
-                        if n == grid_num:
-                            # dense-flat -> reshape to grid (assumes C-order flatten/view)
-                            return labels.view(mask3d.shape)
-                        raise ValueError(f"Unexpected labels shape/length: {tuple(labels.shape)} "
-                                         f"(mask sum={num_mask}, grid num={grid_num})")
 
                     pred_dense = to_dense(pred_, occ_mask_3d).contiguous().cpu().numpy().astype(np.uint8)
                     gt_dense = to_dense(gt_, occ_mask_3d).contiguous().cpu().numpy().astype(np.uint8)
