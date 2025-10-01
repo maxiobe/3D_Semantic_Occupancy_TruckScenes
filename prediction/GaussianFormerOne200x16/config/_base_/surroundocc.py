@@ -20,7 +20,7 @@ train_pipeline = [
     dict(type="LoadMultiViewImageFromFiles", to_float32=True),
     dict(type="LoadOccupancySurroundOcc", occ_path=occ_path, semantic=True, use_ego=True), #transform_to_lidar=True),
     dict(type="ResizeCropFlipImage"),
-    #dict(type="PhotoMetricDistortionMultiViewImage"),
+    dict(type="PhotoMetricDistortionMultiViewImage"),
     dict(type="NormalizeMultiviewImage", **img_norm_cfg),
     dict(type="DefaultFormatBundle"),
     dict(type="NuScenesAdaptor", use_ego=True, num_cams=4),
@@ -51,7 +51,7 @@ data_aug_conf = dict(
     rot_lim=(0.0, 0.0),
     H=928,
     W=1952,
-    rand_flip=False,
+    rand_flip=True,
 )
 
 train_dataset_config = dict(
@@ -75,7 +75,7 @@ val_dataset_config = dict(
 train_loader = dict(
     batch_size=batch_size,
     num_workers=1,
-    shuffle=False
+    shuffle=True
 )
 
 val_loader = dict(

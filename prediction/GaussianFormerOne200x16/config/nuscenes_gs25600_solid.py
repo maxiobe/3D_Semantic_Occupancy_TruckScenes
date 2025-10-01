@@ -16,7 +16,7 @@ data_aug_conf = {
     "H": 928,
     #"W": 1600,
     "W": 1952,
-    "rand_flip": False,
+    "rand_flip": True,
 }
 val_dataset_config = dict(
     data_aug_conf=data_aug_conf
