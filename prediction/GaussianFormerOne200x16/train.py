@@ -330,32 +330,71 @@ def main(local_rank, args):
                     writer.add_scalar('TrainQuick/mIoU', miou, epoch + 1)
                     writer.add_scalar('TrainQuick/iou2', iou2, epoch + 1)
 
-            # Save every 500 epochs or on the very last epoch
+            # Save every 200 epochs or on the very last epoch
             if (epoch % 200 == 0) or (epoch == max_num_epochs - 1):
                 if local_rank == 0:  # Only save on the main process
                     logger.info(f"--- Saving prediction at epoch {epoch} ---")
 
-                    # Get prediction and ground truth
-                    pred_labels = result_dict['final_occ'][0]  # Batch size is 1
-                    gt_labels = result_dict['sampled_label'][0]
-
-                    print(f"pred_logits shape: {pred_labels.shape}")
-
-                    # Convert to NumPy arrays for saving
-                    gt_labels_np = gt_labels.detach().cpu().numpy().astype(np.uint8)
-                    pred_labels_np = pred_labels.detach().cpu().numpy().astype(np.uint8)
-
-                    # Define a unique filename
+                    # Where to save
                     filename = osp.join(save_dir, f'epoch_{epoch:04d}.npz')
 
-                    print(f"pred_labels_np: {pred_labels_np.shape}, gt_labels_np: {gt_labels_np.shape}")
+                    # Tensors from the current forward
+                    occ_mask_3d = result_dict['occ_mask'][0].detach().bool()  # [Z,Y,X]
+                    pred_ = result_dict['final_occ'][0].detach().long()  # [N] or [Z,Y,X]
+                    gt_ = result_dict['sampled_label'][0].detach().long()  # [N] or [Z,Y,X]
 
-                    # Save to a compressed file
+                    # Sanity checks
+                    assert occ_mask_3d.ndim == 3, f"occ_mask must be 3D [Z,Y,X], got {tuple(occ_mask_3d.shape)}"
+                    num_mask = int(occ_mask_3d.sum().item())
+                    grid_num = int(occ_mask_3d.numel())
+                    assert pred_.numel() in (num_mask, grid_num), \
+                        f"pred numel {pred_.numel()} not in {{mask:{num_mask}, grid:{grid_num}}}"
+                    if pred_.numel() == grid_num:
+                        assert tuple(pred_.shape) == tuple(occ_mask_3d.shape), \
+                            f"dense pred shape {tuple(pred_.shape)} != mask shape {tuple(occ_mask_3d.shape)}"
+
+                    EMPTY = 17  # your empty_label in MeanIoU
+
+                    def to_dense(labels, mask3d):
+                        """Convert masked vector [N] to dense [Z,Y,X] using EMPTY outside mask."""
+                        if labels.ndim == 1:
+                            dense = torch.full(mask3d.shape, EMPTY, dtype=torch.long, device=labels.device)
+                            dense[mask3d] = labels
+                            return dense
+                        return labels  # already dense
+
+                    # Densify + make C-contiguous before converting to NumPy
+                    pred_dense = to_dense(pred_, occ_mask_3d).contiguous().cpu().numpy().astype(np.uint8)
+                    gt_dense = to_dense(gt_, occ_mask_3d).contiguous().cpu().numpy().astype(np.uint8)
+                    valid_mask = occ_mask_3d.cpu().numpy().astype(np.bool_)
+
+                    # Grid metadata (prefer pulling from cfg; fall back to Occ3D defaults)
+                    vx = cfg.get('voxel_size', None)
+                    pc_rng = cfg.get('pc_range', None)
+                    if vx is None:
+                        vx = [0.4, 0.4, 0.4]
+                    elif isinstance(vx, (int, float)):
+                        vx = [float(vx), float(vx), float(vx)]
+                    if pc_rng is None:
+                        pc_rng = [-40, -40, -1, 40, 40, 5.4]
+
                     np.savez_compressed(
                         filename,
-                        prediction=pred_labels_np,
-                        ground_truth=gt_labels_np
+                        prediction=pred_dense,
+                        ground_truth=gt_dense,
+                        valid_mask=valid_mask,
+                        axes_order="XYZ",
+                        grid_shape=np.array(pred_dense.shape, np.int32),
+                        voxel_size=np.asarray(vx, dtype=np.float32),
+                        pc_range=np.asarray(pc_rng, dtype=np.float32),
+                        epoch=np.array([epoch], np.int32),
+                        empty_label=np.array([EMPTY], np.int32),
                     )
+
+                    # Quick invariants (safe to comment out later)
+                    assert (pred_dense[~valid_mask] == EMPTY).all(), "outside-mask voxels must be EMPTY"
+                    # Optional (may fail early in training if model predicts EMPTY):
+                    # assert not (pred_dense[valid_mask] == EMPTY).any(), "inside-mask voxels shouldn't be EMPTY"
 
             if args.iter_resume and False:
                 if (i_iter + 1) % 50 == 0 and local_rank == 0:
