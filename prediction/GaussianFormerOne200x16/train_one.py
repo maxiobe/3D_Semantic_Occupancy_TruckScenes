@@ -29,6 +29,19 @@ def main(local_rank, args):
     cfg = Config.fromfile(args.py_config)
     cfg.work_dir = args.work_dir
 
+    target_idx = 0
+    cfg.train_dataset_config.setdefault('vis_indices', [target_idx])
+    cfg.train_dataset_config.pop('num_samples', None)
+
+    cfg.val_dataset_config.setdefault('vis_indices', [target_idx])
+    cfg.val_dataset_config.pop('num_samples', None)
+
+    # --- make loaders tiny & deterministic ---
+    cfg.train_loader.update(dict(batch_size=1, shuffle=False, num_workers=0, persistent_workers=False))
+    cfg.val_loader.update(dict(batch_size=1, shuffle=False, num_workers=0, persistent_workers=False))
+
+    cfg.eval_every_epochs = 10 ** 9
+
     # init DDP
     if args.gpus > 1:
         distributed = True
@@ -54,6 +67,7 @@ def main(local_rank, args):
     
     if local_rank == 0:
         os.makedirs(args.work_dir, exist_ok=True)
+        os.makedirs(osp.join(args.work_dir, "predictions"), exist_ok=True)
         cfg.dump(osp.join(args.work_dir, osp.basename(args.py_config)))
         from misc.tb_wrapper import WrappedTBWriter
         writer = WrappedTBWriter('selfocc', log_dir=osp.join(args.work_dir, 'tf'))
@@ -101,6 +115,11 @@ def main(local_rank, args):
         my_model = my_model.cuda()
         raw_model = my_model
     logger.info('done ddp model')
+
+    import torch.nn as nn
+    def freeze_bn(m):
+        if isinstance(m, nn.modules.batchnorm._BatchNorm):
+            m.eval()
 
     train_dataset_loader, val_dataset_loader = get_dataloader(
         cfg.train_dataset_config,
@@ -189,18 +208,24 @@ def main(local_rank, args):
          True, 17, filter_minmax=False)
     miou_metric.reset()
 
+    save_dir = osp.join(args.work_dir, "predictions")
+
     while epoch < max_num_epochs:
         my_model.train()
+        my_model.apply(freeze_bn)
         os.environ['eval'] = 'false'
         if hasattr(train_dataset_loader.sampler, 'set_epoch'):
             train_dataset_loader.sampler.set_epoch(epoch)
         loss_list = []
-        time.sleep(10)
+        time.sleep(1)
         data_time_s = time.time()
         time_s = time.time()
         for i_iter, data in enumerate(train_dataset_loader):
             if first_run:
                 i_iter = i_iter + last_iter
+
+            # Create a deepcopy of data for saving logic later, to preserve original tensors
+            #data_for_saving = deepcopy(data)
 
             for k in list(data.keys()):
                 if isinstance(data[k], torch.Tensor):
@@ -288,7 +313,98 @@ def main(local_rank, args):
             data_time_s = time.time()
             time_s = time.time()
 
-            if args.iter_resume:
+            if (epoch + 1) % 50 == 0 and local_rank == 0:
+                pred = result_dict['final_occ'][0].detach()  # [N]
+                gt = result_dict['sampled_label'][0].detach()  # [N]
+                mask = result_dict['occ_mask'][0].flatten().detach()  # [N]
+
+                pred = pred.long()
+                gt = gt.long()
+                mask = mask.bool()
+
+                miou_metric.reset()
+                miou_metric._after_step(pred, gt, mask)
+                miou, iou2 = miou_metric._after_epoch()
+                logger.info(f'[TRAIN quick] Epoch {epoch + 1}: mIoU={miou:.4f}, iou2={iou2:.4f}')
+                if writer is not None:
+                    writer.add_scalar('TrainQuick/mIoU', miou, epoch + 1)
+                    writer.add_scalar('TrainQuick/iou2', iou2, epoch + 1)
+
+            # Save every 200 epochs or on the very last epoch
+            if (epoch % 200 == 0) or (epoch == max_num_epochs - 1):
+                if local_rank == 0:
+                    logger.info(f"--- Saving prediction at epoch {epoch} ---")
+                    filename = osp.join(save_dir, f'epoch_{epoch:04d}.npz')
+
+                    occ_mask_3d = result_dict['occ_mask'][0].detach().bool()  # [Z,Y,X]
+                    pred_ = result_dict['final_occ'][0].detach().long()  # [N] or flat [Z*Y*X]
+                    gt_ = result_dict['sampled_label'][0].detach().long()  # [N] or [Z,Y,X]
+
+                    assert occ_mask_3d.ndim == 3, f"occ_mask must be 3D [Z,Y,X], got {occ_mask_3d.shape}"
+                    num_mask = int(occ_mask_3d.sum().item())
+                    grid_num = int(occ_mask_3d.numel())
+
+                    EMPTY = 17  # empty/unknown label
+
+                    def to_dense(labels, mask3d):
+                        """
+                        Return dense [Z,Y,X] labels, guaranteeing that outside mask == EMPTY.
+                        Accepts:
+                          - masked vector [N]
+                          - dense-flat [Z*Y*X]
+                          - dense [Z,Y,X]
+                        """
+                        if labels.ndim == 1:
+                            n = labels.numel()
+                            if n == int(mask3d.sum().item()):
+                                dense = torch.full(mask3d.shape, EMPTY, dtype=torch.long, device=labels.device)
+                                dense[mask3d] = labels
+                                return dense
+                            if n == int(mask3d.numel()):
+                                dense = labels.view(mask3d.shape)
+                                dense = dense.clone()  # avoid modifying the view
+                                dense[~mask3d] = EMPTY  # zero out unsupervised voxels
+                                return dense
+                            raise ValueError(
+                                f"Unexpected labels length {n} (mask sum={int(mask3d.sum())}, grid num={int(mask3d.numel())})")
+                        else:
+                            # already [Z,Y,X]
+                            dense = labels
+                            if dense.shape != mask3d.shape:
+                                raise ValueError(
+                                    f"dense shape {tuple(dense.shape)} != mask shape {tuple(mask3d.shape)}")
+                            dense = dense.clone()
+                            dense[~mask3d] = EMPTY  # enforce EMPTY outside mask
+                            return dense
+
+                    pred_dense = to_dense(pred_, occ_mask_3d).contiguous().cpu().numpy().astype(np.uint8)
+                    gt_dense = to_dense(gt_, occ_mask_3d).contiguous().cpu().numpy().astype(np.uint8)
+                    valid_mask = occ_mask_3d.cpu().numpy().astype(np.bool_)
+
+                    # Pull from cfg if available; otherwise fall back to defaults
+                    vx = cfg.get('voxel_size', [0.4, 0.4, 0.4])
+                    if isinstance(vx, (int, float)):
+                        vx = [float(vx), float(vx), float(vx)]
+                    pc_rng = cfg.get('pc_range', [-40, -40, -1, 40, 40, 5.4])
+
+                    np.savez_compressed(
+                        filename,
+                        prediction=pred_dense,  # [Z,Y,X]
+                        ground_truth=gt_dense,  # [Z,Y,X]
+                        valid_mask=valid_mask,  # [Z,Y,X]
+                        axes_order="XYZ",
+                        grid_shape=np.array(pred_dense.shape, np.int32),
+                        voxel_size=np.asarray(vx, dtype=np.float32),
+                        pc_range=np.asarray(pc_rng, dtype=np.float32),
+                        epoch=np.array([epoch], np.int32),
+                        empty_label=np.array([EMPTY], np.int32),
+                    )
+
+                    # Invariants (ok to comment out later)
+                    assert pred_dense.shape == tuple(occ_mask_3d.shape)
+                    assert (pred_dense[~valid_mask] == EMPTY).all(), "outside-mask must be EMPTY"
+
+            if args.iter_resume and False:
                 if (i_iter + 1) % 50 == 0 and local_rank == 0:
                     dict_to_save = {
                         'state_dict': raw_model.state_dict(),
@@ -305,7 +421,7 @@ def main(local_rank, args):
                     logger.info(f'iter ckpt {i_iter + 1} saved!')
         
         # save checkpoint
-        if local_rank == 0:
+        if local_rank == 0 and False:
             dict_to_save = {
                 'state_dict': raw_model.state_dict(),
                 'optimizer': optimizer.state_dict(),
@@ -327,8 +443,6 @@ def main(local_rank, args):
         my_model.eval()
         os.environ['eval'] = 'true'
         val_loss_list = []
-
-
 
         with torch.no_grad():
             for i_iter_val, data in enumerate(val_dataset_loader):
@@ -355,33 +469,7 @@ def main(local_rank, args):
                         gt_occ = result_dict['sampled_label'][idx]
                         occ_mask = result_dict['occ_mask'][idx].flatten()
                         miou_metric._after_step(pred_occ, gt_occ, occ_mask)
-
-                        is_master = (not distributed) or (
-                                    dist.is_available() and dist.is_initialized() and dist.get_rank() == 0)  # FIX
-                        if is_master and ((i_iter_val) % 500 == 0):
-                            save_root = os.path.join(args.work_dir, "val_dumps", f"epoch_{epoch:03d}")
-                            os.makedirs(save_root, exist_ok=True)
-
-                            pred_np = pred_occ.detach().cpu().numpy()
-                            gt_np = gt_occ.detach().cpu().numpy()
-                            occ_mask_3d= result_dict["occ_mask"][idx].detach().cpu().numpy().astype(np.bool_)
-                            grid_shape = np.array(occ_mask_3d.shape, dtype=np.int32)
-
-                            file_path = os.path.join(
-                                save_root, f"iter_{(i_iter_val):06d}_b{idx}.npz"
-                            )
-
-                            np.savez_compressed(
-                                file_path,
-                                ground_truth=gt_np, # 1D, length N
-                                predictions=pred_np, # 1D, length N
-                                occ_mask=occ_mask_3d, # 3D, e.g. (200, 200, 16)
-                                grid_shape=grid_shape # (X, Y, Z) for quick reshape
-                            )
-                            logger.info(f"[EVAL] Saved dumps at iter {i_iter_val} to {save_root}")
-
-
-
+                
                 val_loss_list.append(loss.detach().cpu().numpy())
                 if i_iter_val % print_freq == 0 and local_rank == 0:
                     logger.info('[EVAL] Epoch %d Iter %5d: Loss: %.3f (%.3f)'%(
