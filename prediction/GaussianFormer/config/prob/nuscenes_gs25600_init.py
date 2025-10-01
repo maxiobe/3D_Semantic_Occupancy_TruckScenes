@@ -171,7 +171,7 @@ model = dict(
                 with_cp=True,
                 dcn=dict(type='DCNv2', deform_groups=1, fallback_on_stride=False), # original DCNv2 will print log when perform load_state_dict
                 stage_with_dcn=(False, False, True, True)),
-            neck_config=dict(
+            neck_confifg=dict(
                 type='SECONDFPN',
                 in_channels=[256, 512, 1024, 2048],
                 out_channels=[embed_dims] * 4,
