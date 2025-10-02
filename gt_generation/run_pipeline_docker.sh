@@ -21,8 +21,8 @@ DATA_ROOT="/truckscenes"
 
 VERSION="v1.0-trainval"
 SPLIT="all"
-START=234
-END=235
+START=233
+END=234
 LOAD_MODE="pointwise"
 
 USE_FLEXCLOUD=0
@@ -69,11 +69,11 @@ do
         --filter_mode both \
         --filter_static_pc \
         --initial_guess_mode ego_pose \
-        --run_mapmos \
         --static_map_keyframes_only \
         --use_flexcloud "$USE_FLEXCLOUD" \
         --filter_lidar_intensity \
         --icp_refinement \
+        #--run_mapmos \
         #--vis_static_frame_comparison_kiss_refined \
         #--pose_error_plot \
         #--vis_aggregated_static_ego_ref_pc \
