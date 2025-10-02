@@ -21,8 +21,8 @@ DATA_ROOT="/truckscenes"
 
 VERSION="v1.0-trainval"
 SPLIT="all"
-START=235
-END=299
+START=543
+END=544
 LOAD_MODE="pointwise"
 
 USE_FLEXCLOUD=0
