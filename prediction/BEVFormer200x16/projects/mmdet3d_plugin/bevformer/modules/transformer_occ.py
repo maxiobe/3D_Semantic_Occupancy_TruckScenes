@@ -37,7 +37,7 @@ class TransformerOcc(BaseModule):
 
     def __init__(self,
                  num_feature_levels=4,
-                 num_cams=6,
+                 num_cams=4,
                  two_stage_num_proposals=300,
                  encoder=None,
                  decoder=None,
