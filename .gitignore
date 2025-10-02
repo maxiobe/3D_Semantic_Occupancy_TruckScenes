@@ -245,6 +245,8 @@ prediction/GaussianFormerOne200x16/data_info
 
 prediction/SparseOcc/data_info
 prediction/SparseOcc/pretrain
+prediction/SparseOcc/outputs
 
 prediction/SparseOcc200x16/data_info
 prediction/SparseOcc200x16/pretrain
+prediction/SparseOcc200x16/outputs
