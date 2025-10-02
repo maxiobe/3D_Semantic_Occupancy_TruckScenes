@@ -73,7 +73,7 @@ do
         --use_flexcloud "$USE_FLEXCLOUD" \
         --filter_lidar_intensity \
         --icp_refinement \
-        #--run_mapmos \
+        --run_mapmos \
         #--vis_static_frame_comparison_kiss_refined \
         #--pose_error_plot \
         #--vis_aggregated_static_ego_ref_pc \
