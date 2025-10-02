@@ -194,7 +194,7 @@ test_pipeline = [
 ]
 
 data = dict(
-    samples_per_gpu=1,
+    samples_per_gpu=4, #1
     workers_per_gpu=4,
     train=dict(
         type=dataset_type,
@@ -245,7 +245,7 @@ lr_config = dict(
     min_lr_ratio=1e-3)
 total_epochs = 24
 evaluation = dict(
-    interval=10,
+    interval=1,
     pipeline=test_pipeline,
     save_best='mIoU', # added
     rule='greater' # added
