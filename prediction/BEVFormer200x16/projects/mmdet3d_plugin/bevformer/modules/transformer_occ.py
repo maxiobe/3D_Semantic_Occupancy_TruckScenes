@@ -23,6 +23,24 @@ from projects.mmdet3d_plugin.models.utils.bricks import run_time
 from mmcv.runner import force_fp32, auto_fp16
 from mmcv.cnn import PLUGIN_LAYERS, Conv2d,Conv3d, ConvModule, caffe2_xavier_init
 
+def _warn_if_bad(tag: str, t: torch.Tensor):
+    if not torch.is_tensor(t):
+        return
+    has_nan = torch.isnan(t).any().item()
+    has_inf = torch.isinf(t).any().item()
+    if has_nan or has_inf:
+        finite = torch.isfinite(t)
+        fin_vals = t[finite]
+        fin_min = fin_vals.min().item() if fin_vals.numel() else float('nan')
+        fin_max = fin_vals.max().item() if fin_vals.numel() else float('nan')
+        fin_mean = fin_vals.mean().item() if fin_vals.numel() else float('nan')
+        print(f"[NaN/Inf DETECTED] {tag} "
+              f"nan:{has_nan} inf:{has_inf} "
+              f"shape:{tuple(t.shape)} dtype:{t.dtype} "
+              f"finite_min:{fin_min:.3e} finite_max:{fin_max:.3e} finite_mean:{fin_mean:.3e}")
+
+
+
 @TRANSFORMER.register_module()
 class TransformerOcc(BaseModule):
     """Implements the Detr3D transformer.
@@ -368,9 +386,18 @@ class TransformerOcc(BaseModule):
 
         bs = mlvl_feats[0].size(0)
         bev_embed = bev_embed.permute(0, 2, 1).view(bs, -1, bev_h, bev_w)
+
+        _warn_if_bad("after bev_embed reshape", bev_embed)
+
         if self.use_3d:
-            outputs=self.decoder(bev_embed.view(bs,-1,self.pillar_h,bev_h, bev_w))
-            outputs=outputs.permute(0,4,3,2,1)
+            #outputs=self.decoder(bev_embed.view(bs,-1,self.pillar_h,bev_h, bev_w))
+            #outputs=outputs.permute(0,4,3,2,1)
+
+            x = bev_embed.view(bs, -1, self.pillar_h, bev_h, bev_w)
+            _warn_if_bad("decoder input (3D)", x)
+            outputs = self.decoder(x)
+            _warn_if_bad("decoder output (3D)", outputs)
+            outputs = outputs.permute(0, 4, 3, 2, 1)
 
             """x = bev_embed.view(bs, -1, self.pillar_h, bev_h, bev_w)
             print("x before decoder")
@@ -383,17 +410,21 @@ class TransformerOcc(BaseModule):
             print(x)"""
 
         elif self.use_conv:
-
+            _warn_if_bad("decoder input (2D conv)", bev_embed)
             outputs = self.decoder(bev_embed)
-            outputs = outputs.view(bs, -1,self.pillar_h, bev_h, bev_w).permute(0,3,4,2, 1)
+            _warn_if_bad("decoder output (2D conv)", outputs)
+            outputs = outputs.view(bs, -1, self.pillar_h, bev_h, bev_w).permute(0, 3, 4, 2, 1)
+            #outputs = self.decoder(bev_embed)
+            #outputs = outputs.view(bs, -1,self.pillar_h, bev_h, bev_w).permute(0,3,4,2, 1)
         else:
-            outputs = self.decoder(bev_embed.permute(0,2,3,1))
-            outputs = outputs.view(bs, bev_h, bev_w,self.pillar_h,self.out_dim)
+            x = self.decoder(bev_embed.permute(0, 2, 3, 1))
+            _warn_if_bad("decoder output (MLP)", x)
+            outputs = x.view(bs, bev_h, bev_w, self.pillar_h, self.out_dim)
+            #outputs = self.decoder(bev_embed.permute(0,2,3,1))
+            #outputs = outputs.view(bs, bev_h, bev_w,self.pillar_h,self.out_dim)
 
-        #print("Outputs before predicter")
-        #print(outputs)
+        _warn_if_bad("before predicter", outputs)
         outputs = self.predicter(outputs)
-        # print('outputs',type(outputs))
-        #print("Outputs after predicter")
-        #print(outputs)
+        _warn_if_bad("after predicter", outputs)
+
         return bev_embed, outputs
