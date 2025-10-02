@@ -426,5 +426,6 @@ class TransformerOcc(BaseModule):
         _warn_if_bad("before predicter", outputs)
         outputs = self.predicter(outputs)
         _warn_if_bad("after predicter", outputs)
+        print("Test")
 
         return bev_embed, outputs
