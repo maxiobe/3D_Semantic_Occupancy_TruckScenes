@@ -116,7 +116,7 @@ class _LocalAggregate(torch.autograd.Function):
         return grads
 
 class LocalAggregator(nn.Module):
-    def __init__(self, scale_multiplier, H, W, D, pc_min, grid_size, radii_min=1, radii_max=18):
+    def __init__(self, scale_multiplier, H, W, D, pc_min, grid_size, radii_min=1, radii_max=16):
         super().__init__()
         self.scale_multiplier = scale_multiplier
         self.H = H
