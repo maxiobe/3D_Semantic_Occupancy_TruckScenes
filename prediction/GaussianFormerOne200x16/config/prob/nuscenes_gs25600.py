@@ -1,3 +1,5 @@
+from prediction.GaussianFormer.config.nuscenes_gs25600_solid import grid_size
+
 _base_ = [
     '../_base_/misc.py',
     '../_base_/model.py',
@@ -5,8 +7,8 @@ _base_ = [
 ]
 
 # =========== data config ==============
-input_shape = (1600, 864)
-data_aug_conf = {
+#input_shape = (1600, 864)
+"""data_aug_conf = {
     "resize_lim": (1.0, 1.0),
     "final_dim": input_shape[::-1],
     "bot_pct_lim": (0.0, 0.0),
@@ -14,9 +16,27 @@ data_aug_conf = {
     "H": 900,
     "W": 1600,
     "rand_flip": True,
-}
+}"""
+data_aug_conf = dict(
+    resize_lim=(1.02, 1.05),   # never smaller than raw
+    final_dim=(960, 1984),     # both divisible by 32
+    bot_pct_lim=(0.0, 0.15),
+    rot_lim=(-3.0, 3.0),
+    H=943, W=1980,
+    rand_flip=True,
+)
+
+val_data_aug_conf = dict(
+    resize_lim=(1.0, 1.0),
+    final_dim=(960, 1984),
+    bot_pct_lim=(0.0, 0.0),
+    rot_lim=(0.0, 0.0),
+    H=943, W=1980,
+    rand_flip=False,
+)
+
 val_dataset_config = dict(
-    data_aug_conf=data_aug_conf
+    data_aug_conf=val_data_aug_conf
 )
 train_dataset_config = dict(
     data_aug_conf=data_aug_conf
@@ -58,7 +78,7 @@ loss = dict(
               #  1.26960524, 1.06258364, 1.189019,   1.06217292, 1.00595144, 0.85706115,
                # 1.03923299, 0.90867526, 0.8936431,  0.85486129, 0.8527829,  0.5       ],
             manual_class_weight=[1.1339, 1.2342, 1.2269, 0.9952, 0.8234, 1.0237, 1.2327, 1.1060, 1.1085,
-                             0.8140, 0.8459, 1.4710, 0.8945, 0.9810, 0.8676, 0.6794, 0.5621],
+                             0.8140, 0.8459, 1.4710, 0.8945, 0.9810, 0.8676, 0.6794, 0.02], #0.5621
             ignore_empty=False,
             lovasz_use_softmax=False),
         dict(
@@ -90,13 +110,14 @@ loss_input_convertion = dict(
 embed_dims = 128
 num_decoder = 4
 #pc_range = [-50.0, -50.0, -5.0, 50.0, 50.0, 3.0]
-pc_range = [-75.0, -75.0, -2.0, 75.0, 75.0, 10.8]
+#pc_range = [-75.0, -75.0, -2.0, 75.0, 75.0, 10.8]
+pc_range = [-40.0, -40.0, -1.0, 40.0, 40.0, 5.4]
 scale_range = [0.01, 1.8]
 xyz_coordinate = 'cartesian'
 phi_activation = 'sigmoid'
 include_opa = True
 #load_from = 'ckpts/r101_dcn_fcos3d_pretrain.pth'
-load_from = '/code/prediction/GaussianFormer/ckpts/r101_dcn_fcos3d_pretrain.pth'
+load_from = '/code/prediction/GaussianFormerOne200x16/ckpts/r101_dcn_fcos3d_pretrain.pth'
 semantics = True
 semantic_dim = 16
 #semantic_dim = 17
@@ -208,7 +229,7 @@ model = dict(
             embed_channels=embed_dims,
             pc_range=pc_range,
             #grid_size=[1.0, 1.0, 1.0],
-            grid_size=[0.2, 0.2, 0.2],
+            grid_size=[0.4, 0.4, 0.4],
             phi_activation=phi_activation,
             xyz_coordinate=xyz_coordinate,
             use_out_proj=True,
@@ -255,11 +276,13 @@ model = dict(
         cuda_kwargs=dict(
             _delete_=True,
             scale_multiplier=4,
-            #H=200, W=200, D=16,
-            H=750, W=750, D=64,
+            H=200, W=200, D=16,
+            pc_min=[-40.0, -40.0, -1.0],
+            grid_size=0.4),
+            #H=750, W=750, D=64,
             #pc_min=[-50.0, -50.0, -5.0],
-            pc_min=[-75.0, -75.0, -2.0],
+            #pc_min=[-75.0, -75.0, -2.0],
             #grid_size=0.5),
-            grid_size=0.2),
+            #grid_size=0.2),
     )
 )

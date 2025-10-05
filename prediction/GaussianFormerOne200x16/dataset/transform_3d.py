@@ -198,11 +198,11 @@ class PhotoMetricDistortionMultiViewImage:
     """
 
     def __init__(
-        self,
-        brightness_delta=32,
-        contrast_range=(0.5, 1.5),
-        saturation_range=(0.5, 1.5),
-        hue_delta=18,
+            self,
+            brightness_delta=32,
+            contrast_range=(0.5, 1.5),
+            saturation_range=(0.5, 1.5),
+            hue_delta=18,
     ):
         self.brightness_delta = brightness_delta
         self.contrast_lower, self.contrast_upper = contrast_range
@@ -365,20 +365,20 @@ class LoadPointFromFile(object):
         pts_path = results['pts_filename']
         scan = np.fromfile(pts_path, dtype=np.float32)
         scan = scan.reshape((-1, 5))[:, :4]
-        scan[:, 3] = 1.0 # n, 4
+        scan[:, 3] = 1.0  # n, 4
         if self.use_ego:
             ego2lidar = results['ego2lidar']
             lidar2ego = np.linalg.inv(ego2lidar)
             scan = lidar2ego[None, ...] @ scan[..., None]
             scan = np.squeeze(scan, axis=-1)
-        scan = scan[:, :3] # n, 3
+        scan = scan[:, :3]  # n, 3
 
         ### filter
         norm = np.linalg.norm(scan, 2, axis=-1)
         mask = (scan[:, 0] > self.pc_range[0]) & (scan[:, 0] < self.pc_range[3]) & \
-            (scan[:, 1] > self.pc_range[1]) & (scan[:, 1] < self.pc_range[4]) & \
-            (scan[:, 2] > self.pc_range[2]) & (scan[:, 2] < self.pc_range[5]) & \
-            (norm > 1.0)
+               (scan[:, 1] > self.pc_range[1]) & (scan[:, 1] < self.pc_range[4]) & \
+               (scan[:, 2] > self.pc_range[2]) & (scan[:, 2] < self.pc_range[5]) & \
+               (norm > 1.0)
         scan = scan[mask]
 
         ### append
@@ -393,14 +393,14 @@ class LoadPointFromFile(object):
             scan = np.concatenate([scan, scan_], 0)
         else:
             scan = scan[np.random.choice(scan.shape[0], self.num_pts, False)]
-        
+
         scan[:, 0] = (scan[:, 0] - self.pc_range[0]) / (self.pc_range[3] - self.pc_range[0])
         scan[:, 1] = (scan[:, 1] - self.pc_range[1]) / (self.pc_range[4] - self.pc_range[1])
         scan[:, 2] = (scan[:, 2] - self.pc_range[2]) / (self.pc_range[5] - self.pc_range[2])
         results['anchor_points'] = scan.astype(np.float32)
-        
+
         return results
-    
+
     def __repr__(self):
         """str: Return a string that describes the module."""
         repr_str = self.__class__.__name__
@@ -424,7 +424,7 @@ class LoadPseudoPointFromFile(object):
         if self.is_ego and (not self.use_ego):
             ego2lidar = results['ego2lidar']
             scan = np.concatenate([scan, np.ones_like(scan[:, :1])], axis=-1)
-            scan = ego2lidar[None, ...] @ scan[..., None] # p, 4, 1
+            scan = ego2lidar[None, ...] @ scan[..., None]  # p, 4, 1
             scan = np.squeeze(scan, axis=-1)
 
         if (not self.is_ego) and self.use_ego:
@@ -433,15 +433,15 @@ class LoadPseudoPointFromFile(object):
             scan = np.concatenate([scan, np.ones_like(scan[:, :1])], axis=-1)
             scan = lidar2ego[None, ...] @ scan[..., None]
             scan = np.squeeze(scan, axis=-1)
-        
-        scan = scan[:, :3] # n, 3
+
+        scan = scan[:, :3]  # n, 3
 
         ### filter
         norm = np.linalg.norm(scan, 2, axis=-1)
         mask = (scan[:, 0] > self.pc_range[0]) & (scan[:, 0] < self.pc_range[3]) & \
-            (scan[:, 1] > self.pc_range[1]) & (scan[:, 1] < self.pc_range[4]) & \
-            (scan[:, 2] > self.pc_range[2]) & (scan[:, 2] < self.pc_range[5]) & \
-            (norm > 1.0)
+               (scan[:, 1] > self.pc_range[1]) & (scan[:, 1] < self.pc_range[4]) & \
+               (scan[:, 2] > self.pc_range[2]) & (scan[:, 2] < self.pc_range[5]) & \
+               (norm > 1.0)
         scan = scan[mask]
 
         ### append
@@ -456,14 +456,14 @@ class LoadPseudoPointFromFile(object):
             scan = np.concatenate([scan, scan_], 0)
         else:
             scan = scan[np.random.choice(scan.shape[0], self.num_pts, False)]
-        
+
         scan[:, 0] = (scan[:, 0] - self.pc_range[0]) / (self.pc_range[3] - self.pc_range[0])
         scan[:, 1] = (scan[:, 1] - self.pc_range[1]) / (self.pc_range[4] - self.pc_range[1])
         scan[:, 2] = (scan[:, 2] - self.pc_range[2]) / (self.pc_range[5] - self.pc_range[2])
         results['anchor_points'] = scan
-        
+
         return results
-    
+
     def __repr__(self):
         """str: Return a string that describes the module."""
         repr_str = self.__class__.__name__
@@ -477,13 +477,13 @@ class LoadOccupancySurroundOcc(object):
         self.occ_path = occ_path
         self.semantic = semantic
         self.use_ego = use_ego
-        #assert semantic and (not use_ego)
+        # assert semantic and (not use_ego)
         self.use_sweeps = use_sweeps
         self.perturb = perturb
 
         xyz = self.get_meshgrid([-40, -40, -1.0, 40, 40, 5.4], [200, 200, 16], 0.4)
         #xyz = self.get_meshgrid([-75, -75, -2.0, 75, 75, 10.8], [750, 750, 64], 0.2)
-        self.xyz = np.concatenate([xyz, np.ones_like(xyz[..., :1])], axis=-1) # x, y, z, 4
+        self.xyz = np.concatenate([xyz, np.ones_like(xyz[..., :1])], axis=-1)  # x, y, z, 4
 
     def get_meshgrid(self, ranges, grid, reso):
         xxx = torch.arange(grid[0], dtype=torch.float) * reso + 0.5 * reso + ranges[0]
@@ -497,29 +497,29 @@ class LoadOccupancySurroundOcc(object):
         xyz = torch.stack([
             xxx, yyy, zzz
         ], dim=-1).numpy()
-        return xyz # x, y, z, 3
+        return xyz  # x, y, z, 3
 
     def __call__(self, results):
-        #label_file = os.path.join(self.occ_path, results['pts_filename'].split('/')[-1]+'.npy')
-        #label_file = os.path.join(self.occ_path, scene_folder_name, sample_token, 'labels.npz')
-        #print(results)
+        # label_file = os.path.join(self.occ_path, results['pts_filename'].split('/')[-1]+'.npy')
+        # label_file = os.path.join(self.occ_path, scene_folder_name, sample_token, 'labels.npz')
+        # print(results)
         label_file = results['occ_path']
 
-        #print(f"Label file: {label_file}")
+        # print(f"Label file: {label_file}")
 
         if os.path.exists(label_file):
-            npz_data = np.load(label_file) # Added maxiobe
+            npz_data = np.load(label_file)  # Added maxiobe
 
             dense_label = npz_data['semantics']
 
-            #new_label = np.ones((200, 200, 16), dtype=np.int64) * 16
-            #new_label[label[:, 0], label[:, 1], label[:, 2]] = label[:, 3]
+            # new_label = np.ones((200, 200, 16), dtype=np.int64) * 16
+            # new_label[label[:, 0], label[:, 1], label[:, 2]] = label[:, 3]
 
             mask = (dense_label != 0)
-            #mask = new_label != 0
-            #mask = npz_data['mask_camera']
+            # mask = new_label != 0
+            # mask = npz_data['mask_camera']
 
-            #results['occ_label'] = new_label if self.semantic else new_label != 16
+            # results['occ_label'] = new_label if self.semantic else new_label != 16
             results['occ_label'] = dense_label if self.semantic else (dense_label != 16)
             results['occ_cam_mask'] = mask
         elif self.use_sweeps:
@@ -563,7 +563,7 @@ class LoadOccupancyKITTI360(object):
         self.semantic = semantic
 
         xyz = self.get_meshgrid([0.0, -25.6, -2.0, 51.2, 25.6, 4.4], [256, 256, 32], 0.2)
-        self.xyz = np.concatenate([xyz, np.ones_like(xyz[..., :1])], axis=-1) # x, y, z, 4
+        self.xyz = np.concatenate([xyz, np.ones_like(xyz[..., :1])], axis=-1)  # x, y, z, 4
         self.unknown_to_empty = unknown_to_empty
         self.training = training
 
@@ -579,9 +579,9 @@ class LoadOccupancyKITTI360(object):
         xyz = torch.stack([
             xxx, yyy, zzz
         ], dim=-1).numpy()
-        return xyz # x, y, z, 3
+        return xyz  # x, y, z, 3
 
-    def __call__(self, results):        
+    def __call__(self, results):
         occ_xyz = self.xyz[..., :3].copy()
         results['occ_xyz'] = occ_xyz
 
