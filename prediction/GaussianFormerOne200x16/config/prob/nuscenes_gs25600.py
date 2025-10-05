@@ -1,5 +1,3 @@
-from prediction.GaussianFormer.config.nuscenes_gs25600_solid import grid_size
-
 _base_ = [
     '../_base_/misc.py',
     '../_base_/model.py',
