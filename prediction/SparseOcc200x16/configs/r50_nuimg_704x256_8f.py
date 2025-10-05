@@ -4,7 +4,8 @@ dataset_root = '/truckscenes/'
 #occ_gt_root = 'data/nuscenes/occ3d'
 occ_gt_root = '/gts/'
 
-anno_root = '/code/prediction/SparseOcc/data_info/mini/'
+#anno_root = '/code/prediction/SparseOcc/data_info/mini/'
+anno_root = '/code/prediction/SparseOcc/data_info/trainval/'
 
 # If point cloud range is changed, the models should also change their point
 # cloud range accordingly
