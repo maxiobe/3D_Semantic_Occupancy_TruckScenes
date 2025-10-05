@@ -220,7 +220,7 @@ lr_config = dict(
     gamma=0.2
 )
 total_epochs = 24
-batch_size = 8
+batch_size = 6
 
 # load pretrained weights
 #load_from = 'pretrain/cascade_mask_rcnn_r50_fpn_coco-20e_20e_nuim_20201009_124951-40963960.pth'
