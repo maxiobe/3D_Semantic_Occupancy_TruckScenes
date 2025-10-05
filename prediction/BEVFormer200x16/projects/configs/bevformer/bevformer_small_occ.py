@@ -156,15 +156,15 @@ data_root = '/truckscenes/'
 file_client_args = dict(backend='disk')
 # occ_gt_data_root='/home/max/ssd/Masterarbeit/TruckScenes/mini/v1.0-mini/'
 occ_gt_data_root = '/gts/'
-#anno_root = '/code/prediction/BEVFormer200x16/data_info/trainval/'
-anno_root = '/code/prediction/BEVFormer200x16/data_info/mini/'
+anno_root = '/code/prediction/BEVFormer200x16/data_info/trainval/'
+#anno_root = '/code/prediction/BEVFormer200x16/data_info/mini/'
 
 train_pipeline = [
     dict(type='LoadMultiViewImageFromFiles', to_float32=True),
     dict(type='LoadOccGTFromFile',data_root=occ_gt_data_root),
     dict(type='PhotoMetricDistortionMultiViewImage'),
     dict(type='LoadAnnotations3D', with_bbox_3d=True, with_label_3d=True, with_attr_label=False),
-    dict(type='RandomScaleImageMultiViewImage', scales=[0.8]),
+    dict(type='RandomScaleImageMultiViewImage', scales=[1.0, 0.9, 0.8]),
     dict(type='ObjectRangeFilter', point_cloud_range=point_cloud_range),
     dict(type='ObjectNameFilter', classes=class_names),
     dict(type='NormalizeMultiviewImage', **img_norm_cfg),
