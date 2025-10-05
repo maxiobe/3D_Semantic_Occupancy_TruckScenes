@@ -33,7 +33,7 @@ def pcolor(string, color, on_color=None, attrs=None):
 
 
 def getCellCoordinates(points, voxelSize):
-    return (points / voxelSize).astype(np.int)
+    return (points / voxelSize).astype(np.int32)
 
 
 def getNumUniqueCells(cells):
@@ -44,7 +44,7 @@ def getNumUniqueCells(cells):
 class Metric_mIoU():
     def __init__(self,
                  save_dir='.',
-                 num_classes=18,
+                 num_classes=17,
                  use_lidar_mask=False,
                  use_image_mask=False,
                  ):
@@ -54,6 +54,13 @@ class Metric_mIoU():
                 'motorcycle', 'pedestrian', 'traffic_cone', 'trailer', 'truck',
                 'driveable_surface', 'other_flat', 'sidewalk',
                 'terrain', 'manmade', 'vegetation','free'
+            ]
+        elif num_classes == 17:
+            self.class_names = [
+                'noise', 'barrier', 'bicycle', 'bus', 'car', 'construction_vehicle',
+                'motorcycle', 'pedestrian', 'traffic_cone', 'trailer', 'truck',
+                'animal', 'traffic_sign', 'other_vehicle',
+                'train', 'background', 'free'
             ]
         elif num_classes == 2:
             self.class_names = ['non-free', 'free']
@@ -70,8 +77,9 @@ class Metric_mIoU():
         self.occ_ydim = int((self.point_cloud_range[4] - self.point_cloud_range[1]) / self.occupancy_size[1])
         self.occ_zdim = int((self.point_cloud_range[5] - self.point_cloud_range[2]) / self.occupancy_size[2])
         self.voxel_num = self.occ_xdim * self.occ_ydim * self.occ_zdim
-        self.hist = np.zeros((self.num_classes, self.num_classes))
+        self.hist = np.zeros((self.num_classes, self.num_classes), dtype=np.int64)
         self.cnt = 0
+        self.free_id = self.num_classes - 1
 
     def hist_info(self, n_cl, pred, gt):
         """
@@ -108,7 +116,7 @@ class Metric_mIoU():
         return result
 
     def compute_mIoU(self, pred, label, n_classes):
-        hist = np.zeros((n_classes, n_classes))
+        hist = np.zeros((n_classes, n_classes), dtype=np.int64)
         new_hist, correct, labeled = self.hist_info(n_classes, pred.flatten(), label.flatten())
         hist += new_hist
         mIoUs = self.per_class_iu(hist)
@@ -132,10 +140,10 @@ class Metric_mIoU():
         if self.num_classes == 2:
             masked_semantics_pred = np.copy(masked_semantics_pred)
             masked_semantics_gt = np.copy(masked_semantics_gt)
-            masked_semantics_pred[masked_semantics_pred < 17] = 0
-            masked_semantics_pred[masked_semantics_pred == 17] = 1
-            masked_semantics_gt[masked_semantics_gt < 17] = 0
-            masked_semantics_gt[masked_semantics_gt == 17] = 1
+            masked_semantics_pred[masked_semantics_pred != self.free_id] = 0
+            masked_semantics_pred[masked_semantics_pred == self.free_id] = 1
+            masked_semantics_gt[masked_semantics_gt != self.free_id] = 0
+            masked_semantics_gt[masked_semantics_gt == self.free_id] = 1
         
         _, _hist = self.compute_mIoU(masked_semantics_pred, masked_semantics_gt, self.num_classes)
         self.hist += _hist
