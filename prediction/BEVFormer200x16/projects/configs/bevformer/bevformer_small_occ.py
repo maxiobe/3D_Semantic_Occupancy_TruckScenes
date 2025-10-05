@@ -164,7 +164,7 @@ train_pipeline = [
     dict(type='LoadOccGTFromFile',data_root=occ_gt_data_root),
     dict(type='PhotoMetricDistortionMultiViewImage'),
     dict(type='LoadAnnotations3D', with_bbox_3d=True, with_label_3d=True, with_attr_label=False),
-    dict(type='RandomScaleImageMultiViewImage', scales=[1.0, 0.9, 0.8]),
+    dict(type='RandomScaleImageMultiViewImage', scales=[0.8]),
     dict(type='ObjectRangeFilter', point_cloud_range=point_cloud_range),
     dict(type='ObjectNameFilter', classes=class_names),
     dict(type='NormalizeMultiviewImage', **img_norm_cfg),
