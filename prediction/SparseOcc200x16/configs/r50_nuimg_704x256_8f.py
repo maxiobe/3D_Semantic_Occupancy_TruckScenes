@@ -55,6 +55,8 @@ _num_frames_ = 8
 _num_queries_ = 100
 _topk_training_ = [4000, 16000, 64000]
 _topk_testing_ = [2000, 8000, 32000]
+#_topk_training_ = [4000, 16000, 82000]
+#_topk_testing_ = [2000, 12000, 48000]
 
 model = dict(
     type='SparseOcc',
@@ -219,7 +221,7 @@ lr_config = dict(
     step=[22, 24],
     gamma=0.2
 )
-total_epochs = 24
+total_epochs = 40 #24
 batch_size = 6
 
 # load pretrained weights
