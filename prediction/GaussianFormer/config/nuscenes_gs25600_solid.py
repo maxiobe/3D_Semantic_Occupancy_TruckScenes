@@ -194,9 +194,9 @@ model = dict(
         empty_args=dict(
             _delete_=True,
             mean=[0, 0, -1.0],
-            scale=[100, 100, 8.0],
+            scale=[1, 1, 0.8],
         ),
-        with_empty=False,
+        with_empty=True,
         cuda_kwargs=dict(
             _delete_=True,
             scale_multiplier=3,
