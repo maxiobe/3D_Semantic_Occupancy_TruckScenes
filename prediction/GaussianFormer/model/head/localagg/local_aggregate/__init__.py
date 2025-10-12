@@ -14,14 +14,6 @@ import torch
 import torch.nn.functional as F
 from . import _C
 
-try:
-    import torch.cuda.nvtx as nvtx
-except Exception:
-    class _NV:
-        def range_push(*a, **k): pass
-        def range_pop(*a, **k): pass
-    nvtx = _NV()
-
 
 class _LocalAggregate(torch.autograd.Function):
     @staticmethod
@@ -50,23 +42,8 @@ class _LocalAggregate(torch.autograd.Function):
             cov3D,
             H, W, D
         )
-
-        nvtx.range_push("local_aggregate[fwd]")
-        evt_s = torch.cuda.Event(enable_timing=True)
-        evt_e = torch.cuda.Event(enable_timing=True)
-        evt_s.record()
-
         # Invoke C++/CUDA rasterizer
         num_rendered, logits, geomBuffer, binningBuffer, imgBuffer = _C.local_aggregate(*args) # todo
-
-        evt_e.record();
-        torch.cuda.synchronize();
-        nvtx.range_pop()
-        # NOTE: printing r_max etc. causes sync anyway; we just synced above.
-        rmax = int(radii.max().item())
-        print(f"[AGG] fwd kernel: {evt_s.elapsed_time(evt_e):.3f} ms | "
-              f"N_pts={pts.shape[0]} M={means3D.shape[0]} r_max={rmax} "
-              f"HWD=({H},{W},{D})")
         
         # Keep relevant tensors for backward
         ctx.num_rendered = num_rendered
@@ -111,18 +88,8 @@ class _LocalAggregate(torch.autograd.Function):
             semantics,
             out_grad)
 
-        nvtx.range_push("local_aggregate[bwd]")
-        evt_s = torch.cuda.Event(enable_timing=True)
-        evt_e = torch.cuda.Event(enable_timing=True)
-        evt_s.record()
-
         # Compute gradients for relevant tensors by invoking backward method
         means3D_grad, opacity_grad, semantics_grad, cov3D_grad = _C.local_aggregate_backward(*args)
-
-        evt_e.record();
-        torch.cuda.synchronize();
-        nvtx.range_pop()
-        print(f"[AGG] bwd kernel: {evt_s.elapsed_time(evt_e):.3f} ms")
 
         grads = (
             None,
@@ -242,9 +209,9 @@ class LocalAggregator(nn.Module):
             radii_i = torch.ceil(scales_i.max(dim=-1)[0] * self.scale_multiplier / self.grid_size).to(torch.int)
             assert radii_i.min() >= 1
 
-            print(f"Radii: {radii_i}")
-            print(f"Length: {len(radii_i)}")
-            print(f"Radii max: {radii_i.max()}, min: {radii_i.min()}")
+            #print(f"Radii: {radii_i}")
+            #print(f"Length: {len(radii_i)}")
+            #print(f"Radii max: {radii_i.max()}, min: {radii_i.min()}")
 
             cov3D_flat_i = cov3D_i.flatten(1)[:, [0, 4, 8, 1, 5, 2]]
 
