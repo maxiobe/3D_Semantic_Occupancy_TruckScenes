@@ -51,13 +51,13 @@ input_modality = dict(
 _dim_ = 256
 _num_points_ = 4
 _num_groups_ = 4
-_num_layers_ = 2
+_num_layers_ = 3 #2
 _num_frames_ = 1 #8
 _num_queries_ = 100
 #_topk_training_ = [4000, 16000, 64000]
 #_topk_training_ = [12000, 32000, 80000]
-_topk_training_ = [100, 400, 1600]
-_topk_testing_ = [2000, 8000, 32000]
+_topk_training_ = [100, 400, 1600, 6400]
+_topk_testing_ = [2000, 8000, 32000, 64000]
 
 model = dict(
     type='SparseOcc',
