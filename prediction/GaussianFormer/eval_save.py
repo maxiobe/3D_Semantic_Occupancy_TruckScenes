@@ -22,9 +22,6 @@ def pass_print(*args, **kwargs):
 
 
 def main(local_rank, args):
-    export_npz = bool(args.occ_out_dir)
-    if export_npz and (local_rank == 0):
-        os.makedirs(args.occ_out_dir, exist_ok=True)
 
     # global settings
     set_random_seed(args.seed)
@@ -253,7 +250,6 @@ if __name__ == '__main__':
 
     ngpus = torch.cuda.device_count()
     args.gpus = ngpus
-    args.grid_size_occ = tuple(int(x) for x in args.occ_shape.split(','))
     print(args)
 
     if ngpus > 1:
