@@ -78,7 +78,8 @@ grid_size=0.2
 #voxel_shape = [200, 200, 16]
 voxel_shape = [750, 750, 64]
 
-scale_range = [0.08, 0.64]
+#scale_range = [0.08, 0.64]
+scale_range = [0.01, 1.8]
 xyz_coordinate = 'cartesian'
 phi_activation = 'sigmoid'
 include_opa = True
