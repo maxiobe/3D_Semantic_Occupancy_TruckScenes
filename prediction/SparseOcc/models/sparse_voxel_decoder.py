@@ -132,7 +132,8 @@ class SparseVoxelDecoder(BaseModule):
 
             # transformer layer
             query_feat = layer(query_feat, query_bbox, mlvl_feats, img_metas)  # [B, N, C]
-            
+
+            print("After query")
             # upsample 2x
             query_feat = self.lift_feat_heads[i](query_feat)  # [B, N, 8C]
             query_feat_2x, query_coord_2x = upsample(query_feat, query_coord, interval // 2)
