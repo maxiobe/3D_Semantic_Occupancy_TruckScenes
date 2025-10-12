@@ -118,6 +118,10 @@ class SparseVoxelDecoder(BaseModule):
         query_coord = generate_grid(self.voxel_dim, interval).expand(B, -1, -1)  # [B, N, 3]
         query_feat = torch.zeros([B, query_coord.shape[1], self.embed_dims], device=query_coord.device)  # [B, N, C]
 
+        print(f"[DEBUG] decoder.num_layers={self.num_layers}, start_interval={interval}, "
+              f"start_Q={query_coord.shape[1]}")
+        print(query_coord.shape)
+
         for i, layer in enumerate(self.decoder_layers):
             print("Layer {}".format(i))
 
