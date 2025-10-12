@@ -249,9 +249,6 @@ if __name__ == '__main__':
     parser.add_argument('--resume-from', type=str, default='')
     parser.add_argument('--seed', type=int, default=42)
     parser.add_argument('--vis-occ', action='store_true', default=False)
-    parser.add_argument('--occ_out_dir', type=str, default='')
-    parser.add_argument('--occ-shape', type=str, default='750,750,64',
-                        help='Occupancy grid shape X,Y,Z (e.g. 750,750,64)')
     args = parser.parse_args()
 
     ngpus = torch.cuda.device_count()
