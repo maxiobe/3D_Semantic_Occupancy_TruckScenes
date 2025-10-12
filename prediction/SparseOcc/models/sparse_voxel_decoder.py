@@ -126,8 +126,8 @@ class SparseVoxelDecoder(BaseModule):
             interval = 2 ** (self.num_layers - i)  # 8 4 2 1
 
             # bbox from coords
-            query_bbox = index2point(query_coord, self.pc_range, voxel_size=0.4)  # [B, N, 3]
-            query_bbox = point2bbox(query_bbox, box_size=0.4 * interval)  # [B, N, 6]
+            query_bbox = index2point(query_coord, self.pc_range, voxel_size=0.2)  # [B, N, 3]
+            query_bbox = point2bbox(query_bbox, box_size=0.2 * interval)  # [B, N, 6]
             query_bbox = encode_bbox(query_bbox, pc_range=self.pc_range)  # [B, N, 6]
 
             # transformer layer
