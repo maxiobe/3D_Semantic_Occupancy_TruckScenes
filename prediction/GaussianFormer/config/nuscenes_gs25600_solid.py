@@ -200,7 +200,7 @@ model = dict(
         with_empty=True,
         cuda_kwargs=dict(
             _delete_=True,
-            scale_multiplier=6, #3
+            scale_multiplier=5,
             H=voxel_shape[0], W=voxel_shape[1], D=voxel_shape[2],
             pc_min=pc_range[:3],
             grid_size=grid_size,),
