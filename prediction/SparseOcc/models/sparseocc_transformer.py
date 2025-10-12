@@ -32,7 +32,7 @@ class SparseOccTransformer(BaseModule):
         
         self.voxel_decoder = SparseVoxelDecoder(
             embed_dims=embed_dims,
-            num_layers=3,
+            num_layers=4, #3
             num_frames=num_frames,
             num_points=num_points,
             num_groups=num_groups,
