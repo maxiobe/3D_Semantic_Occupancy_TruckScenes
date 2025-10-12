@@ -143,8 +143,14 @@ class SparseVoxelDecoder(BaseModule):
             query_feat_2x, query_coord_2x = upsample(query_feat, query_coord, interval // 2)
 
             X, Y, Z = self.voxel_dim
-            query_coord_2x = torch.clamp(query_coord_2x, min=0,
-                                         max=torch.tensor([X - 1, Y - 1, Z - 1], device=query_coord_2x.device))
+            # Build min/max *tensors* with same dtype/device as coords
+            min_xyz = torch.zeros(3, device=query_coord_2x.device, dtype=query_coord_2x.dtype)
+            max_xyz = torch.tensor([X - 1, Y - 1, Z - 1],
+                                   device=query_coord_2x.device,
+                                   dtype=query_coord_2x.dtype)
+
+            # Clamp per-axis
+            query_coord_2x = torch.max(torch.min(query_coord_2x, max_xyz), min_xyz)
 
             if self.semantic:
                 seg_pred_2x = self.seg_pred_heads[i](query_feat_2x)  # [B, K, CLS]
