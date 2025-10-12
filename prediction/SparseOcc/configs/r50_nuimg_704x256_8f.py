@@ -49,9 +49,9 @@ input_modality = dict(
 )
 
 _dim_ = 256
-_num_points_ = 4
+_num_points_ = 16 #4
 _num_groups_ = 4
-_num_layers_ = 4 #2
+_num_layers_ = 5 #2
 _num_frames_ = 1 #8
 _num_queries_ = 100
 #_topk_training_ = [4000, 16000, 64000]
