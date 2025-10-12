@@ -119,6 +119,8 @@ class SparseVoxelDecoder(BaseModule):
         query_feat = torch.zeros([B, query_coord.shape[1], self.embed_dims], device=query_coord.device)  # [B, N, C]
 
         for i, layer in enumerate(self.decoder_layers):
+            print("Layer {}".format(i))
+
             DUMP.stage_count = i
             
             interval = 2 ** (self.num_layers - i)  # 8 4 2 1
