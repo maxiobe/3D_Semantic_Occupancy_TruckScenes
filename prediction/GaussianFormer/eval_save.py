@@ -170,8 +170,6 @@ def main(local_rank, args):
     os.environ['eval'] = 'true'
 
     amp = cfg.get('amp', False)
-    x_grid, y_grid, z_grid = args.grid_size_occ
-    expected_shape = x_grid * y_grid * z_grid
 
     with torch.no_grad():
         for i_iter_val, data in enumerate(tqdm(val_dataset_loader, desc="[EVAL]")):
@@ -187,17 +185,6 @@ def main(local_rank, args):
                 result_dict = my_model(imgs=input_imgs, metas=data)
 
             if 'final_occ' in result_dict:
-
-                sample_ids = None
-                for key in ('sample_token', 'frame_id', 'lidar_token', 'scene_token'):
-                    if key in result_dict and isinstance(result_dict[key], (list, tuple)):
-                        sample_ids = result_dict[key]
-                        break
-                    if key in data and isinstance(data[key], (list, tuple)):
-                        sample_ids = data[key]
-                        break
-
-
                 for idx, pred in enumerate(result_dict['final_occ']):
                     pred_occ = pred
                     gt_occ = result_dict['sampled_label'][idx]
@@ -205,56 +192,29 @@ def main(local_rank, args):
 
                     miou_metric._after_step(pred_occ, gt_occ, occ_mask)
 
-                    if (i_iter_val % 100) != 0:
-                        continue
+                    is_master = (not distributed) or (
+                            dist.is_available() and dist.is_initialized() and dist.get_rank() == 0)  # FIX
+                    if is_master and ((i_iter_val) % 10 == 0):
+                        save_root = os.path.join(args.work_dir, "val_dumps")
+                        os.makedirs(save_root, exist_ok=True)
 
-                    # ---- NPZ export (rank 0 only) ----
-                    if export_npz and (local_rank == 0):
                         pred_np = pred_occ.detach().cpu().numpy()
-                        gt_np = gt_occ.detach().cpu().numpy() if gt_occ is not None else None
-                        m_np = occ_mask.detach().cpu().numpy() if occ_mask is not None else None
+                        gt_np = gt_occ.detach().cpu().numpy()
+                        occ_mask_3d = result_dict["occ_mask"][idx].detach().cpu().numpy().astype(np.bool_)
+                        grid_shape = np.array(occ_mask_3d.shape, dtype=np.int32)
 
-                        if pred_np.size != expected_shape:
-                            logger.warning(
-                                f"[NPZ] size mismatch: pred={pred_np.size}, expected={expected_shape}; saving flat.")
-                        else:
-                            pred_np = pred_np.reshape(x_grid, y_grid, z_grid, order='C')
-                            if gt_np is not None and gt_np.size == expected_shape:
-                                gt_np = gt_np.reshape(x_grid, y_grid, z_grid, order='C')
-                            if m_np is not None and m_np.size == expected_shape:
-                                m_np = m_np.reshape(x_grid, y_grid, z_grid, order='C')
+                        file_path = os.path.join(
+                            save_root, f"iter_{(i_iter_val):06d}_b{idx}.npz"
+                        )
 
-                        # compact dtypes (16 classes fits int16)
-                        if pred_np.dtype.kind != 'i':
-                            pred_np = pred_np.astype(np.int16)
-                        if gt_np is not None and gt_np.dtype.kind != 'i':
-                            gt_np = gt_np.astype(np.int16)
-                        if m_np is not None:
-                            m_np = m_np.astype(np.bool_)
-
-                        stem = f"val_{i_iter_val:06d}_{idx}"
-                        if sample_ids is not None:
-                            try:
-                                sid = sample_ids[idx]
-                                # handle tensors/bytes/arrays
-                                if torch.is_tensor(sid):
-                                    sid = sid.item() if sid.ndim == 0 else sid.cpu().numpy().tolist()
-                                if isinstance(sid, (list, tuple)):
-                                    sid = "_".join(map(str, sid))
-                                if isinstance(sid, bytes):
-                                    sid = sid.decode("utf-8", "ignore")
-                                stem = str(sid)
-                            except Exception:
-                                pass
-                        out_path = os.path.join(args.occ_out_dir, f"{stem}.npz")
-
-                        payload = {'prediction': pred_np}
-                        if gt_np is not None:
-                            payload['ground_truth'] = gt_np
-                        if m_np is not None:
-                            payload['mask'] = m_np
-
-                        np.savez_compressed(out_path, **payload)
+                        np.savez_compressed(
+                            file_path,
+                            ground_truth=gt_np,  # 1D, length N
+                            predictions=pred_np,  # 1D, length N
+                            occ_mask=occ_mask_3d,  # 3D, e.g. (200, 200, 16)
+                            grid_shape=grid_shape  # (X, Y, Z) for quick reshape
+                        )
+                        logger.info(f"[EVAL] Saved dumps at iter {i_iter_val} to {save_root}")
 
                     # if args.vis_occ:
                     #     os.makedirs(os.path.join(args.work_dir, 'vis'), exist_ok=True)
