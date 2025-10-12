@@ -208,6 +208,8 @@ class LocalAggregator(nn.Module):
 
             radii_i = torch.ceil(scales_i.max(dim=-1)[0] * self.scale_multiplier / self.grid_size).to(torch.int)
             assert radii_i.min() >= 1
+            
+            print(f"Radii: {radii_i}")
 
             cov3D_flat_i = cov3D_i.flatten(1)[:, [0, 4, 8, 1, 5, 2]]
 
